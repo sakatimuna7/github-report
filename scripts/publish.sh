@@ -51,16 +51,33 @@ Commits:
 $git_log
 Return ONLY valid JSON in this format: { \"version\": \"...\", \"title\": \"...\", \"description\": \"...\", \"is_prerelease\": false }"
 
+# Construct JSON payload safely using jq
+payload=$(jq -n \
+  --arg prompt "$prompt" \
+  '{
+    model: "llama-3.1-70b-versatile",
+    messages: [{role: "user", content: $prompt}],
+    response_format: {type: "json_object"}
+  }')
+
 response=$(curl -s -X POST "https://api.groq.com/openai/v1/chat/completions" \
      -H "Authorization: Bearer $GROQ_API_KEY" \
      -H "Content-Type: application/json" \
-     -d "{
-       \"model\": \"llama-3.1-70b-versatile\",
-       \"messages\": [{\"role\": \"user\", \"content\": \"$prompt\"}],
-       \"response_format\": {\"type\": \"json_object\"}
-     }")
+     -d "$payload")
+
+# Check for API errors
+if echo "$response" | grep -q "error"; then
+    echo -e "${RED}❌ API Error:$(echo "$response" | jq -r '.error.message')${NC}"
+    exit 1
+fi
 
 ai_suggestion=$(echo "$response" | jq -r '.choices[0].message.content')
+
+if [[ -z "$ai_suggestion" || "$ai_suggestion" == "null" ]]; then
+    echo -e "${RED}❌ Error: AI returned empty response.${NC}"
+    echo "Raw response: $response"
+    exit 1
+fi
 
 version=$(echo "$ai_suggestion" | jq -r '.version')
 title=$(echo "$ai_suggestion" | jq -r '.title')
