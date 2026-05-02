@@ -164,37 +164,45 @@ func runSettings(path string) {
 		gk := os.Getenv("GROQ_API_KEY")
 		gm := os.Getenv("GEMINI_API_KEY")
 
-		gkS := color.RedString("[EMPTY]")
+		gkS := color.RedString("Empty")
 		if gk != "" {
-			gkS = color.GreenString("[SET]")
+			gkS = color.GreenString("Configured")
 		}
-		gmS := color.RedString("[EMPTY]")
+		gmS := color.RedString("Empty")
 		if gm != "" {
-			gmS = color.GreenString("[SET]")
+			gmS = color.GreenString("Configured")
 		}
 
-		var idx int
-		err := huh.NewSelect[int]().
-			Title("Settings").
-			Options(
-				huh.NewOption(fmt.Sprintf("Groq API Key   %s", gkS), 0),
-				huh.NewOption(fmt.Sprintf("Gemini API Key %s", gmS), 1),
-				huh.NewOption("⬅️  Back", 2),
-			).
-			Value(&idx).
-			Run()
+		items := []list.Item{
+			menuItem{title: "Groq API Key", desc: "Status: " + gkS, action: "Groq"},
+			menuItem{title: "Gemini API Key", desc: "Status: " + gmS, action: "Gemini"},
+			menuItem{title: "⬅️  Back", desc: "Return to Main Menu", action: "Back"},
+		}
 
-		if err != nil || idx == 2 {
+		m := menuModel{list: list.New(items, list.NewDefaultDelegate(), 50, 14)}
+		m.list.Title = "Settings"
+		m.list.SetShowStatusBar(false)
+		m.list.SetFilteringEnabled(false)
+		m.list.SetShowHelp(false)
+
+		p := tea.NewProgram(m)
+		model, err := p.Run()
+		if err != nil {
+			break
+		}
+
+		finalModel := model.(menuModel)
+		if finalModel.quitting || finalModel.choice == "Back" {
 			break
 		}
 
 		var res string
-		if idx == 0 {
+		if finalModel.choice == "Groq" {
 			huh.NewInput().Title("Enter Groq API Key").EchoMode(huh.EchoModePassword).Value(&res).Run()
 			if res != "" {
 				os.Setenv("GROQ_API_KEY", res)
 			}
-		} else if idx == 1 {
+		} else if finalModel.choice == "Gemini" {
 			huh.NewInput().Title("Enter Gemini API Key").EchoMode(huh.EchoModePassword).Value(&res).Run()
 			if res != "" {
 				os.Setenv("GEMINI_API_KEY", res)
