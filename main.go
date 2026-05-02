@@ -26,6 +26,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/huh"
 	"github.com/charmbracelet/lipgloss"
+	"github.com/creativeprojects/go-selfupdate"
 	"github.com/fatih/color"
 	"github.com/joho/godotenv"
 )
@@ -215,6 +216,8 @@ func main() {
 		}
 	}
 
+	checkForUpdates()
+
 	_ = godotenv.Load()
 	h, _ := os.UserHomeDir()
 	confPath := h + "/.ghreport"
@@ -379,7 +382,79 @@ func decrypt(cryptoText string, key []byte) []byte {
 	return plaintext
 }
 
+func checkForUpdates() {
+	if Version == "dev" {
+		return // Don't check for updates in dev builds
+	}
 
+	spin := spinner.New(spinner.CharSets[14], 100*time.Millisecond)
+	_ = spin.Color("cyan", "bold")
+	spin.Suffix = color.HiBlackString(" Checking for updates...")
+	spin.Start()
+
+	source, err := selfupdate.NewGitHubSource(selfupdate.GitHubConfig{})
+	if err != nil {
+		spin.Stop()
+		return
+	}
+
+	updater, err := selfupdate.NewUpdater(selfupdate.Config{Source: source})
+	if err != nil {
+		spin.Stop()
+		return
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	repo := selfupdate.ParseSlug("sakatimuna7/github-report")
+	latest, found, err := updater.DetectLatest(ctx, repo)
+	spin.Stop()
+	if err != nil || !found {
+		return
+	}
+
+	if latest.LessOrEqual(Version) {
+		return
+	}
+
+	fmt.Println()
+	color.Green("🎉 A new version of ghreport is available: %s (Current: %s)", latest.Version(), Version)
+	fmt.Println(color.HiBlackString("Release Notes: %s", latest.ReleaseNotes))
+	
+	var confirmUpdate bool
+	err = huh.NewConfirm().
+		Title("Would you like to update now?").
+		Affirmative("Yes, update!").
+		Negative("Not now").
+		Value(&confirmUpdate).
+		Run()
+
+	if err != nil || !confirmUpdate {
+		return
+	}
+
+	spin.Suffix = color.HiBlackString(fmt.Sprintf(" Downloading and installing %s...", latest.Version()))
+	spin.Start()
+
+	exe, err := os.Executable()
+	if err != nil {
+		spin.Stop()
+		color.Red("❌ Failed to get executable path: %v", err)
+		return
+	}
+
+	if err := updater.UpdateTo(ctx, latest, exe); err != nil {
+		spin.Stop()
+		color.Red("❌ Update failed: %v", err)
+		return
+	}
+	spin.Stop()
+
+	color.Green("✅ Successfully updated to %s!", latest.Version())
+	color.Yellow("Please restart the application to use the new version.")
+	os.Exit(0)
+}
 
 func runReport(confPath string) {
 	fs := flag.NewFlagSet("ghreport", flag.ContinueOnError)
