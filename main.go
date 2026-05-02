@@ -2,8 +2,13 @@ package main
 
 import (
 	"context"
+	"crypto/aes"
+	"crypto/cipher"
+	"crypto/rand"
+	"encoding/base64"
 	"flag"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"strings"
@@ -42,7 +47,22 @@ func main() {
 	h, _ := os.UserHomeDir()
 	confPath := h + "/.ghreport"
 	if h != "" {
-		_ = godotenv.Load(confPath)
+		encKey := getEncryptionKey(h)
+		encData, err := os.ReadFile(confPath)
+		if err == nil {
+			dec := decrypt(string(encData), encKey)
+			if dec != nil {
+				m, _ := godotenv.Unmarshal(string(dec))
+				for k, v := range m {
+					if os.Getenv(k) == "" {
+						os.Setenv(k, v)
+					}
+				}
+			} else {
+				// Fallback if not encrypted yet
+				_ = godotenv.Load(confPath)
+			}
+		}
 	}
 
 	for {
@@ -107,9 +127,60 @@ func runSettings(path string) {
 		}
 
 		content := fmt.Sprintf("GROQ_API_KEY=%s\nGEMINI_API_KEY=%s\n", os.Getenv("GROQ_API_KEY"), os.Getenv("GEMINI_API_KEY"))
-		_ = os.WriteFile(path, []byte(content), 0600)
+		
+		h, _ := os.UserHomeDir()
+		encKey := getEncryptionKey(h)
+		encContent := encrypt([]byte(content), encKey)
+		
+		_ = os.WriteFile(path, []byte(encContent), 0600)
 		fmt.Println(color.GreenString("✅ Saved!"))
 	}
+}
+
+func getEncryptionKey(home string) []byte {
+	keyPath := home + "/.ghreport.key"
+	keyData, err := os.ReadFile(keyPath)
+	if err == nil && len(keyData) == 32 {
+		return keyData
+	}
+	key := make([]byte, 32)
+	_, _ = io.ReadFull(rand.Reader, key)
+	_ = os.WriteFile(keyPath, key, 0600)
+	return key
+}
+
+func encrypt(data []byte, key []byte) string {
+	block, _ := aes.NewCipher(key)
+	gcm, _ := cipher.NewGCM(block)
+	nonce := make([]byte, gcm.NonceSize())
+	io.ReadFull(rand.Reader, nonce)
+	ciphertext := gcm.Seal(nonce, nonce, data, nil)
+	return base64.StdEncoding.EncodeToString(ciphertext)
+}
+
+func decrypt(cryptoText string, key []byte) []byte {
+	data, err := base64.StdEncoding.DecodeString(cryptoText)
+	if err != nil {
+		return nil
+	}
+	block, err := aes.NewCipher(key)
+	if err != nil {
+		return nil
+	}
+	gcm, err := cipher.NewGCM(block)
+	if err != nil {
+		return nil
+	}
+	nonceSize := gcm.NonceSize()
+	if len(data) < nonceSize {
+		return nil
+	}
+	nonce, ciphertext := data[:nonceSize], data[nonceSize:]
+	plaintext, err := gcm.Open(nil, nonce, ciphertext, nil)
+	if err != nil {
+		return nil
+	}
+	return plaintext
 }
 
 
