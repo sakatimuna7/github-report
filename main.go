@@ -21,7 +21,10 @@ import (
 	"github-report-ai/pkg/pipeline"
 
 	"github.com/briandowns/spinner"
+	"github.com/charmbracelet/bubbles/list"
+	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/huh"
+	"github.com/charmbracelet/lipgloss"
 	"github.com/fatih/color"
 	"github.com/joho/godotenv"
 )
@@ -46,7 +49,57 @@ func printBanner() {
 	fmt.Println()
 }
 
+type menuItem struct {
+	title, desc string
+	action      string
+}
 
+func (i menuItem) Title() string       { return i.title }
+func (i menuItem) Description() string { return i.desc }
+func (i menuItem) FilterValue() string { return i.title }
+
+var docStyle = lipgloss.NewStyle().Margin(1, 2)
+
+type menuModel struct {
+	list     list.Model
+	choice   string
+	quitting bool
+}
+
+func (m menuModel) Init() tea.Cmd {
+	return nil
+}
+
+func (m menuModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+	switch msg := msg.(type) {
+	case tea.KeyMsg:
+		switch keypress := msg.String(); keypress {
+		case "ctrl+c", "q", "esc":
+			m.quitting = true
+			return m, tea.Quit
+		case "enter":
+			i, ok := m.list.SelectedItem().(menuItem)
+			if ok {
+				m.choice = i.action
+			}
+			return m, tea.Quit
+		}
+	case tea.WindowSizeMsg:
+		h, v := docStyle.GetFrameSize()
+		m.list.SetSize(msg.Width-h, msg.Height-v)
+	}
+
+	var cmd tea.Cmd
+	m.list, cmd = m.list.Update(msg)
+	return m, cmd
+}
+
+func (m menuModel) View() string {
+	if m.quitting || m.choice != "" {
+		return ""
+	}
+	return docStyle.Render(m.list.View())
+}
 
 func main() {
 	_ = godotenv.Load()
@@ -71,26 +124,36 @@ func main() {
 		}
 	}
 
+	items := []list.Item{
+		menuItem{title: "🚀 Report", desc: "Generate a new AI summary of GitHub commits", action: "Report"},
+		menuItem{title: "⚙️  Setting", desc: "Configure your API keys (Groq & Gemini)", action: "Setting"},
+		menuItem{title: "❌ Exit", desc: "Quit the application", action: "Exit"},
+	}
+
 	for {
 		printBanner()
-		var action string
-		err := huh.NewSelect[string]().
-			Title("Main Menu").
-			Options(
-				huh.NewOption("🚀 Report", "Report"),
-				huh.NewOption("⚙️  Setting", "Setting"),
-				huh.NewOption("❌ Exit", "Exit"),
-			).
-			Value(&action).
-			Run()
+		
+		m := menuModel{list: list.New(items, list.NewDefaultDelegate(), 50, 14)}
+		m.list.Title = "Main Menu"
+		m.list.SetShowStatusBar(false)
+		m.list.SetFilteringEnabled(false)
+		m.list.SetShowHelp(false)
 
-		if err != nil || action == "Exit" {
+		p := tea.NewProgram(m)
+		model, err := p.Run()
+		if err != nil {
+			fmt.Printf("Error running menu: %v", err)
+			os.Exit(1)
+		}
+
+		finalModel := model.(menuModel)
+		if finalModel.quitting || finalModel.choice == "Exit" {
 			break
 		}
 
-		if action == "Report" {
+		if finalModel.choice == "Report" {
 			runReport(confPath)
-		} else if action == "Setting" {
+		} else if finalModel.choice == "Setting" {
 			runSettings(confPath)
 		}
 	}
