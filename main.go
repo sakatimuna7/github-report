@@ -22,6 +22,7 @@ import (
 
 	"github.com/briandowns/spinner"
 	"github.com/charmbracelet/bubbles/list"
+	"github.com/charmbracelet/bubbles/viewport"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/huh"
 	"github.com/charmbracelet/lipgloss"
@@ -99,6 +100,59 @@ func (m menuModel) View() string {
 		return ""
 	}
 	return docStyle.Render(m.list.View())
+}
+
+type reportViewerModel struct {
+	viewport viewport.Model
+	ready    bool
+	content  string
+}
+
+func (m reportViewerModel) Init() tea.Cmd {
+	return nil
+}
+
+func (m reportViewerModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+	var (
+		cmd  tea.Cmd
+		cmds []tea.Cmd
+	)
+
+	switch msg := msg.(type) {
+	case tea.KeyMsg:
+		if k := msg.String(); k == "ctrl+c" || k == "q" || k == "esc" {
+			return m, tea.Quit
+		}
+	case tea.WindowSizeMsg:
+		headerHeight := 3
+		footerHeight := 2
+		verticalMarginHeight := headerHeight + footerHeight
+
+		if !m.ready {
+			m.viewport = viewport.New(msg.Width, msg.Height-verticalMarginHeight)
+			m.viewport.SetContent(m.content)
+			m.ready = true
+		} else {
+			m.viewport.Width = msg.Width
+			m.viewport.Height = msg.Height - verticalMarginHeight
+		}
+	}
+
+	m.viewport, cmd = m.viewport.Update(msg)
+	cmds = append(cmds, cmd)
+
+	return m, tea.Batch(cmds...)
+}
+
+func (m reportViewerModel) View() string {
+	if !m.ready {
+		return "\n  Initializing..."
+	}
+
+	header := lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("42")).Render(" ✨ GITHUB REPORT GENERATED ")
+	footer := lipgloss.NewStyle().Foreground(lipgloss.Color("241")).Render(fmt.Sprintf(" %3.f%% • Press 'q' or 'esc' to quit ", m.viewport.ScrollPercent()*100))
+
+	return fmt.Sprintf("\n%s\n\n%s\n\n%s", header, m.viewport.View(), footer)
 }
 
 func main() {
@@ -468,16 +522,16 @@ func runReport(confPath string) {
 	report, _ := fb(mm, sp, merged)
 	spin.Stop()
 
-	fmt.Println()
-	color.Green("╭────────────────────────────────────────────────────────╮")
-	color.Green("│ ✨ REPORT GENERATED SUCCESSFULLY                       │")
-	color.Green("╰────────────────────────────────────────────────────────╯")
-	fmt.Println()
-	fmt.Println(report)
-	fmt.Println()
-	color.Set(color.FgHiBlack)
-	fmt.Printf("Usage: %d Prompt | %d Completion | %d Total Tokens\n", usage.PromptTokens, usage.CompletionTokens, usage.TotalTokens)
-	color.Unset()
-	fmt.Println()
+	reportContent := fmt.Sprintf("%s\n\nUsage: %d Prompt | %d Completion | %d Total Tokens\n", report, usage.PromptTokens, usage.CompletionTokens, usage.TotalTokens)
+
+	p := tea.NewProgram(
+		reportViewerModel{content: reportContent},
+		tea.WithAltScreen(),
+		tea.WithMouseCellMotion(),
+	)
+
+	if _, err := p.Run(); err != nil {
+		fmt.Printf("Error rendering report: %v\n", err)
+	}
 }
 
