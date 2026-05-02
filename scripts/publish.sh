@@ -12,20 +12,30 @@ NC='\033[0m' # No Color
 
 echo -e "${CYAN}🚀 Starting GitHub Release Automation with AI...${NC}"
 
-# 1. Load GROQ_API_KEY from .env
-if [ -f .env ]; then
-    export $(grep -v '^#' .env | xargs)
+# 1. Load GROQ_API_KEY from .env (only if not in CI)
+if [[ "$CI_MODE" != "true" ]]; then
+    if [ -f .env ]; then
+        export $(grep -v '^#' .env | xargs)
+    fi
 fi
 
 if [[ -z "$GROQ_API_KEY" ]]; then
-    echo -e "${RED}❌ Error: GROQ_API_KEY not found in .env.${NC}"
+    echo -e "${RED}❌ Error: GROQ_API_KEY not found.${NC}"
     exit 1
 fi
 
 # 2. Check if gh CLI is authenticated
-if ! gh auth status &>/dev/null; then
-    echo -e "${RED}❌ Error: gh CLI is not authenticated. Please run 'gh auth login' first.${NC}"
-    exit 1
+if [[ "$CI_MODE" == "true" ]]; then
+    if [[ -z "$GITHUB_TOKEN" ]]; then
+        echo -e "${RED}❌ Error: GITHUB_TOKEN not found in CI.${NC}"
+        exit 1
+    fi
+    # In CI, gh uses GITHUB_TOKEN automatically
+else
+    if ! gh auth status &>/dev/null; then
+        echo -e "${RED}❌ Error: gh CLI is not authenticated. Please run 'gh auth login' first.${NC}"
+        exit 1
+    fi
 fi
 
 # 3. Get context for AI
@@ -38,61 +48,62 @@ else
     git_log=$(git log ${latest_tag}..HEAD --oneline)
 fi
 
-if [[ -z "$git_log" ]]; then
+if [[ -z "$git_log" && -z "$INPUT_VERSION" ]]; then
     echo -e "${YELLOW}⚠️  No new commits since $latest_tag. Are you sure you want to release?${NC}"
-    git_log="No new commits found (initial release or force release)"
+    git_log="No new commits found (force release)"
 fi
 
-echo -e "${CYAN}🤖 AI is analyzing changes since ${latest_tag}...${NC}"
+# 4. Handle Inputs (Manual vs AI)
+if [[ -n "$INPUT_VERSION" ]]; then
+    echo -e "${CYAN}📝 Using manual inputs from Workflow...${NC}"
+    version=$INPUT_VERSION
+    title=${INPUT_TITLE:-$version}
+    description="Manual release from GitHub Actions"
+    is_prerelease=${INPUT_PRERELEASE:-false}
+else
+    echo -e "${CYAN}🤖 AI is analyzing changes since ${latest_tag}...${NC}"
 
-# 4. Call Groq API
-prompt="You are a release manager. Based on the latest tag '$latest_tag' and the following commits, suggest the next SemVer tag, a title, and a concise summary of changes for a GitHub release.
-Commits:
-$git_log
-Return ONLY valid JSON in this format: { \"version\": \"...\", \"title\": \"...\", \"description\": \"...\", \"is_prerelease\": false }"
+    prompt="You are a release manager. Based on the latest tag '$latest_tag' and the following commits, suggest the next SemVer tag, a title, and a concise summary of changes for a GitHub release.
+    Commits:
+    $git_log
+    Return ONLY valid JSON in this format: { \"version\": \"...\", \"title\": \"...\", \"description\": \"...\", \"is_prerelease\": false }"
 
-# Construct JSON payload safely using jq
-payload=$(jq -n \
-  --arg prompt "$prompt" \
-  '{
-    model: "llama-3.3-70b-versatile",
-    messages: [{role: "user", content: $prompt}],
-    response_format: {type: "json_object"}
-  }')
+    payload=$(jq -n --arg prompt "$prompt" \
+      '{
+        model: "llama-3.3-70b-versatile",
+        messages: [{role: "user", content: $prompt}],
+        response_format: {type: "json_object"}
+      }')
 
-response=$(curl -s -X POST "https://api.groq.com/openai/v1/chat/completions" \
-     -H "Authorization: Bearer $GROQ_API_KEY" \
-     -H "Content-Type: application/json" \
-     -d "$payload")
+    response=$(curl -s -X POST "https://api.groq.com/openai/v1/chat/completions" \
+         -H "Authorization: Bearer $GROQ_API_KEY" \
+         -H "Content-Type: application/json" \
+         -d "$payload")
 
-# Check for API errors
-if echo "$response" | grep -q "error"; then
-    echo -e "${RED}❌ API Error:$(echo "$response" | jq -r '.error.message')${NC}"
-    exit 1
+    if echo "$response" | grep -q "error"; then
+        echo -e "${RED}❌ API Error:$(echo "$response" | jq -r '.error.message')${NC}"
+        exit 1
+    fi
+
+    ai_suggestion=$(echo "$response" | jq -r '.choices[0].message.content')
+    version=$(echo "$ai_suggestion" | jq -r '.version')
+    title=$(echo "$ai_suggestion" | jq -r '.title')
+    description=$(echo "$ai_suggestion" | jq -r '.description')
+    is_prerelease=$(echo "$ai_suggestion" | jq -r '.is_prerelease')
 fi
 
-ai_suggestion=$(echo "$response" | jq -r '.choices[0].message.content')
-
-if [[ -z "$ai_suggestion" || "$ai_suggestion" == "null" ]]; then
-    echo -e "${RED}❌ Error: AI returned empty response.${NC}"
-    echo "Raw response: $response"
-    exit 1
+# 5. Confirmation
+if [[ "$CI_MODE" == "true" ]]; then
+    confirm="y"
+else
+    echo -e "${YELLOW}--- RELEASE SETTINGS ---${NC}"
+    echo -e "${CYAN}Version: ${NC}$version"
+    echo -e "${CYAN}Title:   ${NC}$title"
+    echo -e "${CYAN}Summary: ${NC}$description"
+    echo -e "${CYAN}Pre-rel: ${NC}$is_prerelease"
+    echo -e "${YELLOW}----------------------${NC}"
+    read -p "Proceed with these settings? (y/n/edit): " confirm
 fi
-
-version=$(echo "$ai_suggestion" | jq -r '.version')
-title=$(echo "$ai_suggestion" | jq -r '.title')
-description=$(echo "$ai_suggestion" | jq -r '.description')
-is_prerelease=$(echo "$ai_suggestion" | jq -r '.is_prerelease')
-
-# 5. Confirm AI suggestions
-echo -e "${YELLOW}--- AI SUGGESTIONS ---${NC}"
-echo -e "${CYAN}Version: ${NC}$version"
-echo -e "${CYAN}Title:   ${NC}$title"
-echo -e "${CYAN}Summary: ${NC}$description"
-echo -e "${CYAN}Pre-rel: ${NC}$is_prerelease"
-echo -e "${YELLOW}----------------------${NC}"
-
-read -p "Proceed with these settings? (y/n/edit): " confirm
 
 if [[ "$confirm" == "edit" ]]; then
     read -p "Enter version tag: " version

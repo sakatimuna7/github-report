@@ -1,0 +1,46 @@
+name: Release
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version tag (e.g. v1.0.1). Leave empty for AI to decide.'
+        required: false
+        default: ''
+      title:
+        description: 'Release title. Leave empty for AI to decide.'
+        required: false
+        default: ''
+      is_prerelease:
+        description: 'Mark as pre-release'
+        type: boolean
+        default: false
+
+jobs:
+  build-and-release:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # Important for git log and tags
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.25.0'
+
+      - name: Install jq
+        run: sudo apt-get install -y jq
+
+      - name: Generate Release and Publish
+        env:
+          GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          INPUT_VERSION: ${{ github.event.inputs.version }}
+          INPUT_TITLE: ${{ github.event.inputs.title }}
+          INPUT_PRERELEASE: ${{ github.event.inputs.is_prerelease }}
+          CI_MODE: "true"
+        run: |
+          # Pass inputs to our script via environment variables
+          bash scripts/publish.sh
