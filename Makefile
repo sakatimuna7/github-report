@@ -8,7 +8,7 @@ BUILD_TIME ?= $(shell date -u +%Y-%m-%dT%H:%M:%SZ)
 
 LDFLAGS = -X main.Version=$(VERSION) -X main.Commit=$(COMMIT) -X main.BuildTime=$(BUILD_TIME)
 
-.PHONY: all build install clean run release
+.PHONY: all build install clean run release publish
 
 all: build
 
@@ -41,3 +41,6 @@ release:
 	# Windows (AMD64)
 	GOOS=windows GOARCH=amd64 go build -ldflags "$(LDFLAGS)" -o dist/$(BINARY_NAME)-windows-amd64.exe main.go
 	@echo "Release builds created in dist/"
+
+publish:
+	@bash scripts/publish.sh
