@@ -6,6 +6,8 @@ ghreport
 *.so
 *.dylib
 
+dist
+
 # Environments
 .env
 .env.local
