@@ -106,6 +106,8 @@ type reportViewerModel struct {
 	viewport viewport.Model
 	ready    bool
 	content  string
+	action   string
+	toast    string
 }
 
 func (m reportViewerModel) Init() tea.Cmd {
@@ -120,8 +122,25 @@ func (m reportViewerModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	switch msg := msg.(type) {
 	case tea.KeyMsg:
-		if k := msg.String(); k == "ctrl+c" || k == "q" || k == "esc" {
+		switch k := msg.String(); k {
+		case "ctrl+c", "q", "esc":
+			m.action = "quit"
 			return m, tea.Quit
+		case "r":
+			m.action = "regen"
+			return m, tea.Quit
+		case "p":
+			m.action = "print"
+			return m, tea.Quit
+		case "c":
+			c := exec.Command("pbcopy")
+			c.Stdin = strings.NewReader(m.content)
+			if err := c.Run(); err == nil {
+				m.toast = "✅ Copied"
+			} else {
+				m.toast = "❌ Copy Failed"
+			}
+			return m, nil
 		}
 	case tea.WindowSizeMsg:
 		headerHeight := 3
@@ -165,7 +184,12 @@ func (m reportViewerModel) View() string {
 		Width(m.viewport.Width)
 
 	header := headerStyle.Render("✨ GITHUB REPORT GENERATED")
-	footer := footerStyle.Render(fmt.Sprintf("%3.f%% • Press 'q' or 'esc' to quit", m.viewport.ScrollPercent()*100))
+	
+	footerText := fmt.Sprintf("%3.f%% • [c] copy • [p] print • [r] regen • [q] quit", m.viewport.ScrollPercent()*100)
+	if m.toast != "" {
+		footerText = fmt.Sprintf("%3.f%% • %s • [c] copy • [p] print • [r] regen • [q] quit", m.viewport.ScrollPercent()*100, m.toast)
+	}
+	footer := footerStyle.Render(footerText)
 
 	return fmt.Sprintf("%s\n%s\n%s", header, m.viewport.View(), footer)
 }
@@ -373,75 +397,77 @@ func runReport(confPath string) {
 
 	var dr, fr, ctxN string
 
-	var dOpts []huh.Option[string]
-	now := time.Now()
-	for i := 0; i < 7; i++ {
-		str := now.AddDate(0, 0, -i).Format("02/01/2006")
-		dOpts = append(dOpts, huh.NewOption(str, str))
-	}
-	dOpts = append(dOpts, huh.NewOption("Custom Range", "Custom Range"))
+	// We wrap everything from the form down in a loop so they can regenerate
+	for {
+		var dOpts []huh.Option[string]
+		now := time.Now()
+		for i := 0; i < 7; i++ {
+			str := now.AddDate(0, 0, -i).Format("02/01/2006")
+			dOpts = append(dOpts, huh.NewOption(str, str))
+		}
+		dOpts = append(dOpts, huh.NewOption("Custom Range", "Custom Range"))
 
-	form := huh.NewForm(
-		huh.NewGroup(
-			huh.NewSelect[string]().
-				Title("AI Model").
-				Options(
-					huh.NewOption("gemini-flash", "gemini-flash"),
-					huh.NewOption("gemini-flash-lite", "gemini-flash-lite"),
-					huh.NewOption("groq-llama", "groq-llama"),
-					huh.NewOption("groq-mixtral", "groq-mixtral"),
-					huh.NewOption("groq-gpt", "groq-gpt"),
-				).
-				Value(mod),
-			huh.NewSelect[string]().
-				Title("Date Period").
-				Options(dOpts...).
-				Value(&dr),
-			huh.NewSelect[string]().
-				Title("Focus").
-				Options(
-					huh.NewOption("1. Semua", "1. Semua"),
-					huh.NewOption("2. Summary", "2. Summary"),
-					huh.NewOption("3. Changes", "3. Changes"),
-					huh.NewOption("4. Modules", "4. Modules"),
-					huh.NewOption("5. Authors", "5. Authors"),
-					huh.NewOption("6. Recs", "6. Recs"),
-				).
-				Value(&fr),
-			huh.NewInput().
-				Title("Context (optional)").
-				Value(&ctxN),
-		),
-	)
-
-	err := form.Run()
-	if err != nil {
-		return
-	}
-
-	var s, u time.Time
-	if dr == "Custom Range" {
-		var since, until string
-		err := huh.NewForm(
+		form := huh.NewForm(
 			huh.NewGroup(
-				huh.NewInput().Title("Since (YYYY-MM-DD)").Value(&since),
-				huh.NewInput().Title("Until (YYYY-MM-DD, Optional)").Value(&until),
+				huh.NewSelect[string]().
+					Title("AI Model").
+					Options(
+						huh.NewOption("gemini-flash", "gemini-flash"),
+						huh.NewOption("gemini-flash-lite", "gemini-flash-lite"),
+						huh.NewOption("groq-llama", "groq-llama"),
+						huh.NewOption("groq-mixtral", "groq-mixtral"),
+						huh.NewOption("groq-gpt", "groq-gpt"),
+					).
+					Value(mod),
+				huh.NewSelect[string]().
+					Title("Date Period").
+					Options(dOpts...).
+					Value(&dr),
+				huh.NewSelect[string]().
+					Title("Focus").
+					Options(
+						huh.NewOption("1. Semua", "1. Semua"),
+						huh.NewOption("2. Summary", "2. Summary"),
+						huh.NewOption("3. Changes", "3. Changes"),
+						huh.NewOption("4. Modules", "4. Modules"),
+						huh.NewOption("5. Authors", "5. Authors"),
+						huh.NewOption("6. Recs", "6. Recs"),
+					).
+					Value(&fr),
+				huh.NewInput().
+					Title("Context (optional)").
+					Value(&ctxN),
 			),
-		).Run()
+		)
+
+		err := form.Run()
 		if err != nil {
 			return
 		}
-		s, _ = time.Parse("2006-01-02", since)
-		if until != "" {
-			u, _ = time.Parse("2006-01-02", until)
+
+		var s, u time.Time
+		if dr == "Custom Range" {
+			var since, until string
+			err := huh.NewForm(
+				huh.NewGroup(
+					huh.NewInput().Title("Since (YYYY-MM-DD)").Value(&since),
+					huh.NewInput().Title("Until (YYYY-MM-DD, Optional)").Value(&until),
+				),
+			).Run()
+			if err != nil {
+				return
+			}
+			s, _ = time.Parse("2006-01-02", since)
+			if until != "" {
+				u, _ = time.Parse("2006-01-02", until)
+			} else {
+				u = time.Now()
+			}
 		} else {
-			u = time.Now()
+			sd, _ := time.Parse("02/01/2006", dr)
+			s = time.Date(sd.Year(), sd.Month(), sd.Day(), 0, 0, 0, 0, sd.Location())
+			u = time.Date(sd.Year(), sd.Month(), sd.Day(), 23, 59, 59, 0, sd.Location())
 		}
-	} else {
-		sd, _ := time.Parse("02/01/2006", dr)
-		s = time.Date(sd.Year(), sd.Month(), sd.Day(), 0, 0, 0, 0, sd.Location())
-		u = time.Date(sd.Year(), sd.Month(), sd.Day(), 23, 59, 59, 0, sd.Location())
-	}
 
 	h, _ := os.UserHomeDir()
 	cache := h + "/.ghreport_cache"
@@ -545,8 +571,21 @@ func runReport(confPath string) {
 		tea.WithMouseCellMotion(),
 	)
 
-	if _, err := p.Run(); err != nil {
+	model, err := p.Run()
+	if err != nil {
 		fmt.Printf("Error rendering report: %v\n", err)
+		return
+	}
+
+	finalModel := model.(reportViewerModel)
+	if finalModel.action == "regen" {
+		continue
+	} else if finalModel.action == "print" {
+		fmt.Println("\n" + reportContent + "\n")
+		return
+	} else {
+		return
+	}
 	}
 }
 
