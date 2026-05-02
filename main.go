@@ -30,6 +30,18 @@ import (
 	"github.com/joho/godotenv"
 )
 
+var (
+	Version   = "dev"
+	Commit    = "none"
+	BuildTime = "unknown"
+)
+
+func printVersion() {
+	fmt.Printf("ghreport version %s\n", Version)
+	fmt.Printf("commit: %s\n", Commit)
+	fmt.Printf("built at: %s\n", BuildTime)
+}
+
 func sh(c string, a ...string) string {
 	o, _ := exec.Command(c, a...).Output()
 	return strings.TrimSpace(string(o))
@@ -195,6 +207,14 @@ func (m reportViewerModel) View() string {
 }
 
 func main() {
+	// Simple version check before anything else
+	for _, arg := range os.Args {
+		if arg == "-v" || arg == "--version" || arg == "version" {
+			printVersion()
+			return
+		}
+	}
+
 	_ = godotenv.Load()
 	h, _ := os.UserHomeDir()
 	confPath := h + "/.ghreport"

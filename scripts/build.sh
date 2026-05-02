@@ -1,10 +1,8 @@
 #!/bin/bash
 # Script to build the ghreport binary
 
-BINARY_NAME="ghreport"
-
-echo "🚀 Building ${BINARY_NAME}..."
-go build -o ${BINARY_NAME} main.go
+echo "🚀 Building via Makefile..."
+make build
 
 if [ $? -eq 0 ]; then
     echo "✅ Build successful!"
