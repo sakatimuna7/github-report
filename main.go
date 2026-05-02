@@ -21,9 +21,9 @@ import (
 	"github-report-ai/pkg/pipeline"
 
 	"github.com/briandowns/spinner"
+	"github.com/charmbracelet/huh"
 	"github.com/fatih/color"
 	"github.com/joho/godotenv"
-	"github.com/manifoldco/promptui"
 )
 
 func sh(c string, a ...string) string {
@@ -46,31 +46,7 @@ func printBanner() {
 	fmt.Println()
 }
 
-var selectTemplates = &promptui.SelectTemplates{
-	Label:    "{{ . }}?",
-	Active:   "➤ {{ . | cyan | bold }}",
-	Inactive: "  {{ . | white }}",
-	Selected: "✔ {{ . | green }}",
-}
 
-func beautifulSelect(label string, items []string) (int, string, error) {
-	prompt := promptui.Select{
-		Label:     label,
-		Items:     items,
-		Templates: selectTemplates,
-	}
-	return prompt.Run()
-}
-
-func beautifulPrompt(label string, isPassword bool) (string, error) {
-	prompt := promptui.Prompt{
-		Label: label,
-	}
-	if isPassword {
-		prompt.Mask = '*'
-	}
-	return prompt.Run()
-}
 
 func main() {
 	_ = godotenv.Load()
@@ -97,19 +73,25 @@ func main() {
 
 	for {
 		printBanner()
-		_, r, err := beautifulSelect("Main Menu", []string{"🚀 Report", "⚙️  Setting", "❌ Exit"})
-		if err != nil || r == "❌ Exit" {
+		var action string
+		err := huh.NewSelect[string]().
+			Title("Main Menu").
+			Options(
+				huh.NewOption("🚀 Report", "Report"),
+				huh.NewOption("⚙️  Setting", "Setting"),
+				huh.NewOption("❌ Exit", "Exit"),
+			).
+			Value(&action).
+			Run()
+
+		if err != nil || action == "Exit" {
 			break
 		}
 
-		if r == "🚀 Report" {
-			fmt.Println()
+		if action == "Report" {
 			runReport(confPath)
-			fmt.Println()
-		} else if r == "⚙️  Setting" {
-			fmt.Println()
+		} else if action == "Setting" {
 			runSettings(confPath)
-			fmt.Println()
 		}
 	}
 }
@@ -128,23 +110,29 @@ func runSettings(path string) {
 			gmS = color.GreenString("[SET]")
 		}
 
-		idx, _, err := beautifulSelect("Settings", []string{
-			fmt.Sprintf("Groq API Key   %s", gkS),
-			fmt.Sprintf("Gemini API Key %s", gmS),
-			"⬅️  Back",
-		})
+		var idx int
+		err := huh.NewSelect[int]().
+			Title("Settings").
+			Options(
+				huh.NewOption(fmt.Sprintf("Groq API Key   %s", gkS), 0),
+				huh.NewOption(fmt.Sprintf("Gemini API Key %s", gmS), 1),
+				huh.NewOption("⬅️  Back", 2),
+			).
+			Value(&idx).
+			Run()
 
 		if err != nil || idx == 2 {
 			break
 		}
 
+		var res string
 		if idx == 0 {
-			res, _ := beautifulPrompt("Enter Groq API Key", true)
+			huh.NewInput().Title("Enter Groq API Key").EchoMode(huh.EchoModePassword).Value(&res).Run()
 			if res != "" {
 				os.Setenv("GROQ_API_KEY", res)
 			}
 		} else if idx == 1 {
-			res, _ := beautifulPrompt("Enter Gemini API Key", true)
+			huh.NewInput().Title("Enter Gemini API Key").EchoMode(huh.EchoModePassword).Value(&res).Run()
 			if res != "" {
 				os.Setenv("GEMINI_API_KEY", res)
 			}
@@ -243,36 +231,77 @@ func runReport(confPath string) {
 		*tok = sh("gh", "auth", "token")
 	}
 
-	sel := func(l string, i []string) string {
-		_, r, _ := beautifulSelect(l, i)
-		return r
-	}
+	var dr, fr, ctxN string
 
-	*mod = sel("AI Model", []string{"gemini-flash", "gemini-flash-lite", "groq-llama", "groq-mixtral", "groq-gpt"})
-
-	var d []string
+	var dOpts []huh.Option[string]
 	now := time.Now()
 	for i := 0; i < 7; i++ {
-		d = append(d, now.AddDate(0, 0, -i).Format("02/01/2006"))
+		str := now.AddDate(0, 0, -i).Format("02/01/2006")
+		dOpts = append(dOpts, huh.NewOption(str, str))
 	}
-	d = append(d, "Custom Range")
-	dr := sel("Date Period", d)
+	dOpts = append(dOpts, huh.NewOption("Custom Range", "Custom Range"))
+
+	form := huh.NewForm(
+		huh.NewGroup(
+			huh.NewSelect[string]().
+				Title("AI Model").
+				Options(
+					huh.NewOption("gemini-flash", "gemini-flash"),
+					huh.NewOption("gemini-flash-lite", "gemini-flash-lite"),
+					huh.NewOption("groq-llama", "groq-llama"),
+					huh.NewOption("groq-mixtral", "groq-mixtral"),
+					huh.NewOption("groq-gpt", "groq-gpt"),
+				).
+				Value(mod),
+			huh.NewSelect[string]().
+				Title("Date Period").
+				Options(dOpts...).
+				Value(&dr),
+			huh.NewSelect[string]().
+				Title("Focus").
+				Options(
+					huh.NewOption("1. Semua", "1. Semua"),
+					huh.NewOption("2. Summary", "2. Summary"),
+					huh.NewOption("3. Changes", "3. Changes"),
+					huh.NewOption("4. Modules", "4. Modules"),
+					huh.NewOption("5. Authors", "5. Authors"),
+					huh.NewOption("6. Recs", "6. Recs"),
+				).
+				Value(&fr),
+			huh.NewInput().
+				Title("Context (optional)").
+				Value(&ctxN),
+		),
+	)
+
+	err := form.Run()
+	if err != nil {
+		return
+	}
 
 	var s, u time.Time
 	if dr == "Custom Range" {
-		v, _ := beautifulPrompt("Since (YYYY-MM-DD)", false)
-		s, _ = time.Parse("2006-01-02", v)
-		v, _ = beautifulPrompt("Until", false)
-		if v != "" {
-			u, _ = time.Parse("2006-01-02", v)
+		var since, until string
+		err := huh.NewForm(
+			huh.NewGroup(
+				huh.NewInput().Title("Since (YYYY-MM-DD)").Value(&since),
+				huh.NewInput().Title("Until (YYYY-MM-DD, Optional)").Value(&until),
+			),
+		).Run()
+		if err != nil {
+			return
+		}
+		s, _ = time.Parse("2006-01-02", since)
+		if until != "" {
+			u, _ = time.Parse("2006-01-02", until)
+		} else {
+			u = time.Now()
 		}
 	} else {
 		sd, _ := time.Parse("02/01/2006", dr)
 		s = time.Date(sd.Year(), sd.Month(), sd.Day(), 0, 0, 0, 0, sd.Location())
 		u = time.Date(sd.Year(), sd.Month(), sd.Day(), 23, 59, 59, 0, sd.Location())
 	}
-
-	fr := sel("Focus", []string{"1. Semua", "2. Summary", "3. Changes", "4. Modules", "5. Authors", "6. Recs"})
 
 	h, _ := os.UserHomeDir()
 	cache := h + "/.ghreport_cache"
@@ -295,7 +324,7 @@ func runReport(confPath string) {
 		return
 	}
 
-	ctxN, _ := beautifulPrompt("Context (optional)", false)
+
 
 	var usage ai.Usage
 	var mu sync.Mutex
