@@ -27,6 +27,7 @@ import (
 	"github.com/charmbracelet/huh"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/creativeprojects/go-selfupdate"
+	"github.com/dustin/go-humanize"
 	"github.com/fatih/color"
 	"github.com/joho/godotenv"
 )
@@ -434,26 +435,50 @@ func checkForUpdates() {
 		return
 	}
 
-	spin.Suffix = color.HiBlackString(fmt.Sprintf(" Downloading and installing %s...", latest.Version()))
-	spin.Start()
-
 	exe, err := os.Executable()
 	if err != nil {
-		spin.Stop()
 		color.Red("❌ Failed to get executable path: %v", err)
 		return
 	}
+
+	// Wrapper for progress bar
+	onProgress := func(downloaded, total int64) {
+		if total <= 0 {
+			return
+		}
+		pct := float64(downloaded) / float64(total) * 100
+		barLen := 30
+		filledLen := int(float64(barLen) * pct / 100)
+		if filledLen > barLen {
+			filledLen = barLen
+		}
+		bar := strings.Repeat("█", filledLen) + strings.Repeat("░", barLen-filledLen)
+		fmt.Printf("\r%s [%s] %.1f%% (%s/%s)", 
+			color.HiBlackString(" Downloading:"), 
+			color.CyanString(bar), 
+			pct, 
+			humanize.Bytes(uint64(downloaded)), 
+			humanize.Bytes(uint64(total)))
+	}
+
+	// Update the updater with a progress-aware source
+	updater, _ = selfupdate.NewUpdater(selfupdate.Config{
+		Source: &progressSource{
+			Source:     source,
+			onProgress: onProgress,
+		},
+	})
 
 	// Use a longer timeout for the actual download and installation
 	updateCtx, updateCancel := context.WithTimeout(context.Background(), 5*time.Minute)
 	defer updateCancel()
 
 	if err := updater.UpdateTo(updateCtx, latest, exe); err != nil {
-		spin.Stop()
+		fmt.Println() // New line after progress bar
 		color.Red("❌ Update failed: %v", err)
 		return
 	}
-	spin.Stop()
+	fmt.Println() // New line after progress bar
 
 	color.Green("✅ Successfully updated to %s!", latest.Version())
 	color.Yellow("Please restart the application to use the new version.")
@@ -686,5 +711,42 @@ func runReport(confPath string) {
 		return
 	}
 	}
+}
+
+type progressReader struct {
+	io.ReadCloser
+	total      int64
+	downloaded int64
+	onProgress func(downloaded, total int64)
+}
+
+func (pr *progressReader) Read(p []byte) (int, error) {
+	n, err := pr.ReadCloser.Read(p)
+	pr.downloaded += int64(n)
+	if pr.onProgress != nil {
+		pr.onProgress(pr.downloaded, pr.total)
+	}
+	return n, err
+}
+
+type progressSource struct {
+	selfupdate.Source
+	onProgress func(downloaded, total int64)
+}
+
+func (ps *progressSource) DownloadReleaseAsset(ctx context.Context, rel *selfupdate.Release, assetID int64) (io.ReadCloser, error) {
+	rc, err := ps.Source.DownloadReleaseAsset(ctx, rel, assetID)
+	if err != nil {
+		return nil, err
+	}
+	var size int64
+	if assetID == rel.AssetID {
+		size = int64(rel.AssetByteSize)
+	}
+	return &progressReader{
+		ReadCloser: rc,
+		total:      size,
+		onProgress: ps.onProgress,
+	}, nil
 }
 
