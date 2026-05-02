@@ -31,6 +31,47 @@ func sh(c string, a ...string) string {
 	return strings.TrimSpace(string(o))
 }
 
+func printBanner() {
+	fmt.Println()
+	color.Cyan(`   ____ _ _   _   _       _     ____                       _   `)
+	color.Cyan(`  / ___(_) |_| | | |_   _| |__ |  _ \ ___ _ __   ___  _ __| |_ `)
+	color.Cyan(` | |  _| | __| |_| | | | | '_ \| |_) / _ \ '_ \ / _ \| '__| __|`)
+	color.Cyan(` | |_| | | |_|  _  | |_| | |_) |  _ <  __/ |_) | (_) | |  | |_ `)
+	color.Cyan(`  \____|_|\__|_| |_|\__,_|_.__/|_| \_\___| .__/ \___/|_|   \__|`)
+	color.Cyan(`                                         |_|                   `)
+	color.Set(color.FgHiBlack)
+	fmt.Println("   AI-Powered GitHub Commit Summarizer")
+	fmt.Println("   ===================================")
+	color.Unset()
+	fmt.Println()
+}
+
+var selectTemplates = &promptui.SelectTemplates{
+	Label:    "{{ . }}?",
+	Active:   "➤ {{ . | cyan | bold }}",
+	Inactive: "  {{ . | white }}",
+	Selected: "✔ {{ . | green }}",
+}
+
+func beautifulSelect(label string, items []string) (int, string, error) {
+	prompt := promptui.Select{
+		Label:     label,
+		Items:     items,
+		Templates: selectTemplates,
+	}
+	return prompt.Run()
+}
+
+func beautifulPrompt(label string, isPassword bool) (string, error) {
+	prompt := promptui.Prompt{
+		Label: label,
+	}
+	if isPassword {
+		prompt.Mask = '*'
+	}
+	return prompt.Run()
+}
+
 func main() {
 	_ = godotenv.Load()
 	h, _ := os.UserHomeDir()
@@ -55,19 +96,20 @@ func main() {
 	}
 
 	for {
-		p := promptui.Select{
-			Label: "GitHub Report AI",
-			Items: []string{"🚀 Report", "⚙️  Setting", "❌ Exit"},
-		}
-		_, r, err := p.Run()
+		printBanner()
+		_, r, err := beautifulSelect("Main Menu", []string{"🚀 Report", "⚙️  Setting", "❌ Exit"})
 		if err != nil || r == "❌ Exit" {
 			break
 		}
 
 		if r == "🚀 Report" {
+			fmt.Println()
 			runReport(confPath)
+			fmt.Println()
 		} else if r == "⚙️  Setting" {
+			fmt.Println()
 			runSettings(confPath)
+			fmt.Println()
 		}
 	}
 }
@@ -86,30 +128,23 @@ func runSettings(path string) {
 			gmS = color.GreenString("[SET]")
 		}
 
-		p := promptui.Select{
-			Label: "Settings",
-			Items: []string{
-				fmt.Sprintf("Groq API Key   %s", gkS),
-				fmt.Sprintf("Gemini API Key %s", gmS),
-				"⬅️  Back",
-			},
-		}
+		idx, _, err := beautifulSelect("Settings", []string{
+			fmt.Sprintf("Groq API Key   %s", gkS),
+			fmt.Sprintf("Gemini API Key %s", gmS),
+			"⬅️  Back",
+		})
 
-		idx, _, err := p.Run()
 		if err != nil || idx == 2 {
 			break
 		}
 
-		prompt := promptui.Prompt{Mask: '*'}
 		if idx == 0 {
-			prompt.Label = "Enter Groq API Key"
-			res, _ := prompt.Run()
+			res, _ := beautifulPrompt("Enter Groq API Key", true)
 			if res != "" {
 				os.Setenv("GROQ_API_KEY", res)
 			}
 		} else if idx == 1 {
-			prompt.Label = "Enter Gemini API Key"
-			res, _ := prompt.Run()
+			res, _ := beautifulPrompt("Enter Gemini API Key", true)
 			if res != "" {
 				os.Setenv("GEMINI_API_KEY", res)
 			}
@@ -175,22 +210,19 @@ func decrypt(cryptoText string, key []byte) []byte {
 
 
 func runReport(confPath string) {
-	owner := flag.String("owner", "", "")
-	repo := flag.String("repo", "", "")
-	branch := flag.String("branch", "", "")
-	lim := flag.Int("limit", 0, "")
-	tok := flag.String("token", os.Getenv("GITHUB_TOKEN"), "")
-	gk := flag.String("groq-key", os.Getenv("GROQ_API_KEY"), "")
-	gm := flag.String("gemini-key", os.Getenv("GEMINI_API_KEY"), "")
-	mod := flag.String("ai", "gemini-flash", "")
+	fs := flag.NewFlagSet("ghreport", flag.ContinueOnError)
+	owner := fs.String("owner", "", "")
+	repo := fs.String("repo", "", "")
+	branch := fs.String("branch", "", "")
+	lim := fs.Int("limit", 0, "")
+	tok := fs.String("token", os.Getenv("GITHUB_TOKEN"), "")
+	gk := fs.String("groq-key", os.Getenv("GROQ_API_KEY"), "")
+	gm := fs.String("gemini-key", os.Getenv("GEMINI_API_KEY"), "")
+	mod := fs.String("ai", "gemini-flash", "")
 	
-	// Reset flags for re-runs if necessary, but flag.Parse can only be called once.
-	// Since we are in a loop, we should probably handle flags differently or only once.
-	if !flag.Parsed() {
-		flag.Parse()
-	}
+	_ = fs.Parse(os.Args[1:])
 
-	if *owner == "" || *repo == "" || (flag.NArg() > 0 && flag.Arg(0) == ".") {
+	if *owner == "" || *repo == "" || (fs.NArg() > 0 && fs.Arg(0) == ".") {
 		u := sh("git", "remote", "get-url", "origin")
 		u = strings.TrimPrefix(strings.TrimPrefix(u, "https://github.com/"), "git@github.com:")
 		u = strings.TrimSuffix(u, ".git")
@@ -212,8 +244,7 @@ func runReport(confPath string) {
 	}
 
 	sel := func(l string, i []string) string {
-		p := promptui.Select{Label: l, Items: i}
-		_, r, _ := p.Run()
+		_, r, _ := beautifulSelect(l, i)
 		return r
 	}
 
@@ -229,11 +260,9 @@ func runReport(confPath string) {
 
 	var s, u time.Time
 	if dr == "Custom Range" {
-		p := promptui.Prompt{Label: "Since (YYYY-MM-DD)"}
-		v, _ := p.Run()
+		v, _ := beautifulPrompt("Since (YYYY-MM-DD)", false)
 		s, _ = time.Parse("2006-01-02", v)
-		p.Label = "Until"
-		v, _ = p.Run()
+		v, _ = beautifulPrompt("Until", false)
 		if v != "" {
 			u, _ = time.Parse("2006-01-02", v)
 		}
@@ -250,10 +279,14 @@ func runReport(confPath string) {
 	_ = os.MkdirAll(cache, 0755)
 	cc := pipeline.NewFileCache(cache + "/" + fmt.Sprintf("%s_%s_%s_%s_chunks.json", *owner, *repo, *branch, s.Format("2006-01-02")))
 
-	color.Cyan("\n🚀 GITHUB REPORT AI\n====================")
+	fmt.Println()
+	color.Cyan("╭────────────────────────────────────────╮")
+	color.Cyan("│ 🚀 GENERATING REPORT                   │")
+	color.Cyan("╰────────────────────────────────────────╯")
 	c := context.Background()
 	spin := spinner.New(spinner.CharSets[14], 100*time.Millisecond)
-	spin.Suffix = " Fetching..."
+	_ = spin.Color("cyan", "bold")
+	spin.Suffix = color.HiBlackString(" Fetching GitHub Data...")
 	spin.Start()
 	raw, err := github.NewClient(*tok).GetReportData(c, *owner, *repo, *branch, *lim, s, u)
 	spin.Stop()
@@ -262,7 +295,7 @@ func runReport(confPath string) {
 		return
 	}
 
-	ctxN, _ := (&promptui.Prompt{Label: "Context (optional)"}).Run()
+	ctxN, _ := beautifulPrompt("Context (optional)", false)
 
 	var usage ai.Usage
 	var mu sync.Mutex
@@ -315,14 +348,14 @@ func runReport(confPath string) {
 		mm, rm = "groq-llama", "groq-mixtral"
 	}
 
-	spin.Suffix = " MAP..."
+	spin.Suffix = color.HiBlackString(" MAP Phase (Parallel Analysis)...")
 	spin.Restart()
 	mRes := pool.Run(c, chunks, func(ctx context.Context, d string) (string, error) { return fb(mm, pipeline.MapSysPrompt, d) })
 	spin.Stop()
 	sums, _ := pipeline.CollectSuccessful(mRes)
 	_ = cc.Flush()
 
-	spin.Suffix = " REDUCE..."
+	spin.Suffix = color.HiBlackString(" REDUCE Phase (Merging Insights)...")
 	spin.Restart()
 	merged, _ := fb(rm, pipeline.ReduceSysPrompt, strings.Join(sums, "\n---\n"))
 
@@ -335,6 +368,16 @@ func runReport(confPath string) {
 	report, _ := fb(mm, sp, merged)
 	spin.Stop()
 
-	fmt.Printf("\n%s\n%s\n%s\n%s\nUsage: P:%d C:%d T:%d\n", color.CyanString("✨ REPORT"), strings.Repeat("-", 40), report, strings.Repeat("-", 40), usage.PromptTokens, usage.CompletionTokens, usage.TotalTokens)
+	fmt.Println()
+	color.Green("╭────────────────────────────────────────────────────────╮")
+	color.Green("│ ✨ REPORT GENERATED SUCCESSFULLY                       │")
+	color.Green("╰────────────────────────────────────────────────────────╯")
+	fmt.Println()
+	fmt.Println(report)
+	fmt.Println()
+	color.Set(color.FgHiBlack)
+	fmt.Printf("Usage: %d Prompt | %d Completion | %d Total Tokens\n", usage.PromptTokens, usage.CompletionTokens, usage.TotalTokens)
+	color.Unset()
+	fmt.Println()
 }
 
