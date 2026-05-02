@@ -29,8 +29,14 @@ if ! gh auth status &>/dev/null; then
 fi
 
 # 3. Get context for AI
-latest_tag=$(git describe --tags --abbrev=0 2>/dev/null || echo "v0.0.0")
-git_log=$(git log ${latest_tag}..HEAD --oneline)
+latest_tag=$(git describe --tags --abbrev=0 2>/dev/null || echo "")
+if [[ -z "$latest_tag" ]]; then
+    echo -e "${YELLOW}ℹ️  No tags found. Analyzing all commits...${NC}"
+    git_log=$(git log --oneline)
+    latest_tag="none"
+else
+    git_log=$(git log ${latest_tag}..HEAD --oneline)
+fi
 
 if [[ -z "$git_log" ]]; then
     echo -e "${YELLOW}⚠️  No new commits since $latest_tag. Are you sure you want to release?${NC}"
