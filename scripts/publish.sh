@@ -55,7 +55,7 @@ Return ONLY valid JSON in this format: { \"version\": \"...\", \"title\": \"...\
 payload=$(jq -n \
   --arg prompt "$prompt" \
   '{
-    model: "groq-llama",
+    model: "llama-3.3-70b-versatile",
     messages: [{role: "user", content: $prompt}],
     response_format: {type: "json_object"}
   }')
