@@ -125,7 +125,7 @@ func (m reportViewerModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 	case tea.WindowSizeMsg:
 		headerHeight := 3
-		footerHeight := 2
+		footerHeight := 3
 		verticalMarginHeight := headerHeight + footerHeight
 
 		if !m.ready {
@@ -149,10 +149,25 @@ func (m reportViewerModel) View() string {
 		return "\n  Initializing..."
 	}
 
-	header := lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("42")).Render(" ✨ GITHUB REPORT GENERATED ")
-	footer := lipgloss.NewStyle().Foreground(lipgloss.Color("241")).Render(fmt.Sprintf(" %3.f%% • Press 'q' or 'esc' to quit ", m.viewport.ScrollPercent()*100))
+	headerStyle := lipgloss.NewStyle().
+		Bold(true).
+		Foreground(lipgloss.Color("42")).
+		Border(lipgloss.RoundedBorder(), true).
+		BorderForeground(lipgloss.Color("42")).
+		Padding(0, 1).
+		Width(m.viewport.Width)
 
-	return fmt.Sprintf("\n%s\n\n%s\n\n%s", header, m.viewport.View(), footer)
+	footerStyle := lipgloss.NewStyle().
+		Foreground(lipgloss.Color("241")).
+		Border(lipgloss.RoundedBorder(), true).
+		BorderForeground(lipgloss.Color("241")).
+		Padding(0, 1).
+		Width(m.viewport.Width)
+
+	header := headerStyle.Render("✨ GITHUB REPORT GENERATED")
+	footer := footerStyle.Render(fmt.Sprintf("%3.f%% • Press 'q' or 'esc' to quit", m.viewport.ScrollPercent()*100))
+
+	return fmt.Sprintf("%s\n%s\n%s", header, m.viewport.View(), footer)
 }
 
 func main() {
