@@ -26,23 +26,12 @@ import (
 	"github.com/manifoldco/promptui"
 )
 
-//go:embed .env
-var envB string
-
 func sh(c string, a ...string) string {
 	o, _ := exec.Command(c, a...).Output()
 	return strings.TrimSpace(string(o))
 }
 
 func main() {
-	if envB != "" {
-		m, _ := godotenv.Unmarshal(envB)
-		for k, v := range m {
-			if os.Getenv(k) == "" {
-				os.Setenv(k, v)
-			}
-		}
-	}
 	_ = godotenv.Load()
 	h, _ := os.UserHomeDir()
 	confPath := h + "/.ghreport"

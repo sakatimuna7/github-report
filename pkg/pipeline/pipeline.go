@@ -27,9 +27,10 @@ const MapSysPrompt = `Role: SE
 Task: Summarize git commits
 Rules:
 - bullet per category (feat/fix/chore/refactor)
+- for 'feat': DO NOT limit bullets, detail each feature as short sub-bullets (no long lines)
 - include module if clear
 - simple language
-- max 5 bullets`
+- max 5 bullets (except 'feat')`
 
 const ReduceSysPrompt = `Role: SE
 Task: Merge commit summaries
@@ -37,7 +38,8 @@ Rules:
 - remove duplicates
 - keep most important
 - group by category
-- max 7 bullets total`
+- for 'feat': keep detailed sub-bullets, do not limit
+- max 7 bullets total (except 'feat')`
 
 // Stats holds pipeline execution statistics.
 type Stats struct {
