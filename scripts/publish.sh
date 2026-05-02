@@ -122,14 +122,15 @@ if [ "$is_prerelease" = "true" ]; then
     prerelease_flag="--prerelease"
 fi
 
-# 6. Build binaries
-echo -e "${CYAN}🏗️  Building binaries for all platforms...${NC}"
-make clean
-make release
-
-# 7. Create Git tag
+# 6. Create Git tag first (so git describe finds it)
 echo -e "${CYAN}🏷️  Creating git tag $version...${NC}"
 git tag -a "$version" -m "$title"
+
+# 7. Build binaries with explicit version
+echo -e "${CYAN}🏗️  Building binaries for all platforms...${NC}"
+make clean
+VERSION=$version make release
+
 echo -e "${CYAN}⬆️  Pushing tag to origin...${NC}"
 git push origin "$version"
 

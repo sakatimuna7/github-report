@@ -475,7 +475,13 @@ func checkForUpdates() {
 
 	if err := updater.UpdateTo(updateCtx, latest, exe); err != nil {
 		fmt.Println() // New line after progress bar
-		color.Red("❌ Update failed: %v", err)
+		if strings.Contains(err.Error(), "permission denied") {
+			color.Red("❌ Update failed: Permission denied.")
+			color.Yellow("Tip: Try running with 'sudo' to allow updating to %s", exe)
+			color.HiBlackString("Example: sudo ghreport")
+		} else {
+			color.Red("❌ Update failed: %v", err)
+		}
 		return
 	}
 	fmt.Println() // New line after progress bar
