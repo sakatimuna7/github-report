@@ -95,6 +95,9 @@ fi
 # 5. Confirmation
 if [[ "$CI_MODE" == "true" ]]; then
     confirm="y"
+    # Configure git identity for CI
+    git config user.name "github-actions[bot]"
+    git config user.email "github-actions[bot]@users.noreply.github.com"
 else
     echo -e "${YELLOW}--- RELEASE SETTINGS ---${NC}"
     echo -e "${CYAN}Version: ${NC}$version"
