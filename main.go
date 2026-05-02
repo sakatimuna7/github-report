@@ -444,7 +444,11 @@ func checkForUpdates() {
 		return
 	}
 
-	if err := updater.UpdateTo(ctx, latest, exe); err != nil {
+	// Use a longer timeout for the actual download and installation
+	updateCtx, updateCancel := context.WithTimeout(context.Background(), 5*time.Minute)
+	defer updateCancel()
+
+	if err := updater.UpdateTo(updateCtx, latest, exe); err != nil {
 		spin.Stop()
 		color.Red("❌ Update failed: %v", err)
 		return
