@@ -1,25 +1,18 @@
 package main
 
 import (
-	"context"
-	"encoding/json"
 	"fmt"
 	"os"
-	"time"
 
 	"github-report-ai/internal/config"
 	"github-report-ai/internal/report"
 	"github-report-ai/internal/ui/molecules"
 	"github-report-ai/internal/ui/pages"
 	"github-report-ai/internal/updater"
-	"github-report-ai/internal/utils"
-	"github-report-ai/pkg/github"
 
-	"github.com/briandowns/spinner"
 	"github.com/charmbracelet/bubbles/list"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/creativeprojects/go-selfupdate"
-	"github.com/fatih/color"
 	"github.com/joho/godotenv"
 )
 
@@ -68,66 +61,12 @@ func main() {
 		molecules.NewMenuItem("❌ Exit", "Quit the application", "Exit"),
 	}
 
-	var dashData github.DashboardData
-	var dashLoaded bool
-	var dashErr error
-	var username string
-
-	tok := os.Getenv("GITHUB_TOKEN")
-	if tok == "" {
-		tok = os.Getenv("GH_TOKEN")
-	}
-	if tok == "" {
-		tok = utils.Sh("gh", "auth", "token")
-	}
-
-	if tok != "" {
-		c := context.Background()
-		gh := github.NewClient(tok)
-		
-		spin := spinner.New(spinner.CharSets[14], 100*time.Millisecond)
-		_ = spin.Color("cyan", "bold")
-		spin.Suffix = color.HiBlackString(" Loading your GitHub profile & stats...")
-		spin.Start()
-
-		username, _ = gh.GetUserLogin(c)
-		
-		if username != "" {
-			dashCachePath := h + "/.ghreport_dashboard.json"
-			type DashCache struct {
-				Data      github.DashboardData
-				Timestamp time.Time
-			}
-			var cache DashCache
-			if data, err := os.ReadFile(dashCachePath); err == nil {
-				if json.Unmarshal(data, &cache) == nil {
-					if time.Since(cache.Timestamp) < 24*time.Hour {
-						dashData = cache.Data
-						dashLoaded = true
-					}
-				}
-			}
-
-			if !dashLoaded {
-				dashData, dashErr = gh.GetDashboardData(c, username)
-				if dashErr == nil {
-					dashLoaded = true
-					cache = DashCache{Data: dashData, Timestamp: time.Now()}
-					if b, err := json.Marshal(cache); err == nil {
-						_ = os.WriteFile(dashCachePath, b, 0644)
-					}
-				}
-			}
-		}
-		spin.Stop()
-	}
+	// Dashboard removed per user request
 
 	for {
 		m := pages.MenuModel{
-			List:       list.New(items, list.NewDefaultDelegate(), 50, 14),
-			DashData:   dashData,
-			DashLoaded: dashLoaded,
-			LatestRel:  latestRelease,
+			List:      list.New(items, list.NewDefaultDelegate(), 50, 14),
+			LatestRel: latestRelease,
 		}
 		m.List.Title = "Main Menu"
 		m.List.SetShowStatusBar(false)

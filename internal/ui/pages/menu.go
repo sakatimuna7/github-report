@@ -5,20 +5,16 @@ import (
 
 	"github-report-ai/internal/ui/atoms"
 	"github-report-ai/internal/ui/molecules"
-	"github-report-ai/internal/ui/organisms"
-	"github-report-ai/pkg/github"
 	"github.com/charmbracelet/bubbles/list"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/creativeprojects/go-selfupdate"
 )
 
 type MenuModel struct {
-	List       list.Model
-	Choice     string
-	Quitting   bool
-	DashData   github.DashboardData
-	DashLoaded bool
-	LatestRel  *selfupdate.Release
+	List      list.Model
+	Choice    string
+	Quitting  bool
+	LatestRel *selfupdate.Release
 }
 
 func (m MenuModel) Init() tea.Cmd {
@@ -64,9 +60,6 @@ func (m MenuModel) View() string {
 	}
 	
 	view := atoms.GetBanner()
-	if m.DashLoaded {
-		view += organisms.RenderDashboard(m.DashData) + "\n"
-	}
 	if m.LatestRel != nil {
 		notice := fmt.Sprintf("🎉 Update Available: %s\nPress 'u' to update now", m.LatestRel.Version())
 		view += atoms.NoticeStyle.Render(notice) + "\n"
