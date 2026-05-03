@@ -70,3 +70,22 @@ func LoadTemplates() (map[string]string, error) {
 	}
 	return templates, nil
 }
+
+func SaveTemplate(name, content string) error {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return err
+	}
+	dir := filepath.Join(home, ".ghreport_templates")
+	_ = os.MkdirAll(dir, 0755)
+	return os.WriteFile(filepath.Join(dir, name+".txt"), []byte(content), 0644)
+}
+
+func DeleteTemplate(name string) error {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return err
+	}
+	path := filepath.Join(home, ".ghreport_templates", name+".txt")
+	return os.Remove(path)
+}
