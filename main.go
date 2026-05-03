@@ -22,6 +22,7 @@ import (
 
 	"github.com/briandowns/spinner"
 	"github.com/charmbracelet/bubbles/list"
+	"github.com/charmbracelet/bubbles/table"
 	"github.com/charmbracelet/bubbles/viewport"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/huh"
@@ -629,23 +630,81 @@ func runReport(confPath string) {
 	_ = os.MkdirAll(cache, 0755)
 	cc := pipeline.NewFileCache(cache + "/" + fmt.Sprintf("%s_%s_%s_%s_chunks.json", *owner, *repo, *branch, s.Format("2006-01-02")))
 
-	fmt.Println()
-	color.Cyan("╭────────────────────────────────────────╮")
-	color.Cyan("│ 🚀 GENERATING REPORT                   │")
-	color.Cyan("╰────────────────────────────────────────╯")
 	c := context.Background()
 	spin := spinner.New(spinner.CharSets[14], 100*time.Millisecond)
 	_ = spin.Color("cyan", "bold")
 	spin.Suffix = color.HiBlackString(" Fetching GitHub Data...")
 	spin.Start()
-	raw, err := github.NewClient(*tok).GetReportData(c, *owner, *repo, *branch, *lim, s, u)
+	raw, stats, err := github.NewClient(*tok).GetReportData(c, *owner, *repo, *branch, *lim, s, u)
 	spin.Stop()
 	if err != nil {
 		fmt.Printf(color.RedString("Error: %v\n", err))
 		return
 	}
 
+	// Confirmation Step
+	var proceed bool
+	
+	columns := []table.Column{
+		{Title: "Category", Width: 25},
+		{Title: "Count", Width: 10},
+	}
 
+	rows := []table.Row{
+		{"Total Commits", fmt.Sprintf("%d", stats.Total)},
+		{"Features", fmt.Sprintf("%d", stats.Features)},
+		{"Fixes", fmt.Sprintf("%d", stats.Fixes)},
+		{"Overtime", fmt.Sprintf("%d", stats.Overtime)},
+	}
+
+	t := table.New(
+		table.WithColumns(columns),
+		table.WithRows(rows),
+		table.WithFocused(false),
+		table.WithHeight(5),
+	)
+
+	st := table.DefaultStyles()
+	st.Header = st.Header.
+		BorderStyle(lipgloss.NormalBorder()).
+		BorderForeground(lipgloss.Color("240")).
+		BorderBottom(true).
+		Bold(true)
+	st.Selected = lipgloss.NewStyle() // Disable selection style for static view
+	t.SetStyles(st)
+
+	tableStyle := lipgloss.NewStyle().
+		Border(lipgloss.RoundedBorder()).
+		BorderForeground(lipgloss.Color("36")).
+		Padding(0, 1).
+		MarginBottom(1)
+
+	summary := tableStyle.Render(t.View())
+
+	err = huh.NewForm(
+		huh.NewGroup(
+			huh.NewNote().
+				Title("Review Selections").
+				Description(fmt.Sprintf("Model: %s\nPeriod: %s\nFocus: %s", *mod, dr, fr)),
+			huh.NewNote().
+				Title("Commit Statistics").
+				Description(summary),
+			huh.NewConfirm().
+				Title("Proceed to generate AI report?").
+				Affirmative("Yes, execute").
+				Negative("No, go back").
+				Value(&proceed),
+		),
+	).Run()
+
+	if err != nil || !proceed {
+		continue
+	}
+
+	fmt.Println()
+	color.Cyan("╭────────────────────────────────────────╮")
+	color.Cyan("│ 🚀 GENERATING REPORT                   │")
+	color.Cyan("╰────────────────────────────────────────╯")
 
 	var usage ai.Usage
 	var mu sync.Mutex

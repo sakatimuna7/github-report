@@ -24,7 +24,14 @@ func NewClient(token string) *Client {
 	}
 }
 
-func (c *Client) GetReportData(ctx context.Context, owner, repo, branch string, limit int, since, until time.Time) (string, error) {
+type CommitStats struct {
+	Total    int
+	Features int
+	Fixes    int
+	Overtime int
+}
+
+func (c *Client) GetReportData(ctx context.Context, owner, repo, branch string, limit int, since, until time.Time) (string, CommitStats, error) {
 	var allCommits []*github.RepositoryCommit
 	
 	opts := &github.CommitsListOptions{
@@ -44,7 +51,7 @@ func (c *Client) GetReportData(ctx context.Context, owner, repo, branch string, 
 	for {
 		commits, resp, err := c.client.Repositories.ListCommits(ctx, owner, repo, opts)
 		if err != nil {
-			return "", fmt.Errorf("error fetching commits: %w", err)
+			return "", CommitStats{}, fmt.Errorf("error fetching commits: %w", err)
 		}
 		
 		allCommits = append(allCommits, commits...)
@@ -62,6 +69,7 @@ func (c *Client) GetReportData(ctx context.Context, owner, repo, branch string, 
 		opts.Page = resp.NextPage
 	}
 
+	stats := CommitStats{Total: len(allCommits)}
 	var sb strings.Builder
 	sb.WriteString(fmt.Sprintf("Repo: %s/%s | Branch: %s\n\n", owner, repo, branch))
 	sb.WriteString(fmt.Sprintf("Total activity fetched: %d commits\n", len(allCommits)))
@@ -69,6 +77,22 @@ func (c *Client) GetReportData(ctx context.Context, owner, repo, branch string, 
 	lastDate := ""
 	for _, commit := range allCommits {
 		fullMsg := commit.GetCommit().GetMessage()
+		lowerMsg := strings.ToLower(fullMsg)
+		
+		// Basic conventional commit detection
+		if strings.HasPrefix(lowerMsg, "feat") {
+			stats.Features++
+		} else if strings.HasPrefix(lowerMsg, "fix") {
+			stats.Fixes++
+		}
+		
+		// Overtime check: 6 PM to 8 AM
+		date := commit.GetCommit().GetAuthor().GetDate()
+		hour := date.Hour()
+		if hour >= 18 || hour < 8 {
+			stats.Overtime++
+		}
+
 		// Only take the first line of the commit message (subject)
 		shortMsg := strings.Split(fullMsg, "\n")[0]
 		
@@ -84,5 +108,5 @@ func (c *Client) GetReportData(ctx context.Context, owner, repo, branch string, 
 		sb.WriteString(fmt.Sprintf("- %s (by %s)\n", shortMsg, author))
 	}
 
-	return sb.String(), nil
+	return sb.String(), stats, nil
 }
