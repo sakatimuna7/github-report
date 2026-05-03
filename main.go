@@ -6,6 +6,7 @@ import (
 	"crypto/cipher"
 	"crypto/rand"
 	"encoding/base64"
+	"encoding/json"
 	"flag"
 	"fmt"
 	"io"
@@ -81,9 +82,11 @@ func (i menuItem) FilterValue() string { return i.title }
 var docStyle = lipgloss.NewStyle().Margin(1, 2)
 
 type menuModel struct {
-	list     list.Model
-	choice   string
-	quitting bool
+	list       list.Model
+	choice     string
+	quitting   bool
+	dashData   github.DashboardData
+	dashLoaded bool
 }
 
 func (m menuModel) Init() tea.Cmd {
@@ -129,6 +132,9 @@ func (m menuModel) View() string {
 	}
 	
 	view := getBanner()
+	if m.dashLoaded {
+		view += renderDashboard(m.dashData) + "\n"
+	}
 	if latestRelease != nil {
 		noticeStyle := lipgloss.NewStyle().
 			Border(lipgloss.RoundedBorder()).
@@ -285,8 +291,53 @@ func main() {
 		menuItem{title: "❌ Exit", desc: "Quit the application", action: "Exit"},
 	}
 
+	var dashData github.DashboardData
+	var dashLoaded bool
+	var dashErr error
+	var username string
+
+	tok := os.Getenv("GITHUB_TOKEN")
+	if tok != "" {
+		c := context.Background()
+		gh := github.NewClient(tok)
+		username, _ = gh.GetUserLogin(c)
+		
+		if username != "" {
+			dashCachePath := h + "/.ghreport_dashboard.json"
+			// Try to load from cache
+			type DashCache struct {
+				Data      github.DashboardData
+				Timestamp time.Time
+			}
+			var cache DashCache
+			if data, err := os.ReadFile(dashCachePath); err == nil {
+				if json.Unmarshal(data, &cache) == nil {
+					if time.Since(cache.Timestamp) < 24*time.Hour {
+						dashData = cache.Data
+						dashLoaded = true
+					}
+				}
+			}
+
+			if !dashLoaded {
+				dashData, dashErr = gh.GetDashboardData(c, username)
+				if dashErr == nil {
+					dashLoaded = true
+					cache = DashCache{Data: dashData, Timestamp: time.Now()}
+					if b, err := json.Marshal(cache); err == nil {
+						_ = os.WriteFile(dashCachePath, b, 0644)
+					}
+				}
+			}
+		}
+	}
+
 	for {
-		m := menuModel{list: list.New(items, list.NewDefaultDelegate(), 50, 14)}
+		m := menuModel{
+			list:       list.New(items, list.NewDefaultDelegate(), 50, 14),
+			dashData:   dashData,
+			dashLoaded: dashLoaded,
+		}
 		m.list.Title = "Main Menu"
 		m.list.SetShowStatusBar(false)
 		m.list.SetFilteringEnabled(false)
@@ -300,16 +351,14 @@ func main() {
 		}
 
 		finalModel := model.(menuModel)
-		if finalModel.quitting || finalModel.choice == "Exit" {
-			break
-		}
-
-		if finalModel.choice == "Update" && latestRelease != nil {
-			doUpdate(latestRelease)
-		} else if finalModel.choice == "Report" {
+		if finalModel.choice == "Report" {
 			runReport(confPath)
 		} else if finalModel.choice == "Setting" {
 			runSettings(confPath)
+		} else if finalModel.choice == "Update" {
+			doUpdate(latestRelease)
+		} else {
+			break
 		}
 	}
 }
@@ -635,21 +684,6 @@ func runReport(confPath string) {
 	h, _ := os.UserHomeDir()
 	historyPath := h + "/.ghreport_history.json"
 
-	var dashData github.DashboardData
-	var dashLoaded bool
-	var dashErr error
-	var username string
-
-	if !*ciMode && *tok != "" {
-		c := context.Background()
-		gh := github.NewClient(*tok)
-		username, _ = gh.GetUserLogin(c)
-		if username != "" {
-			dashData, dashErr = gh.GetDashboardData(c, username)
-			dashLoaded = (dashErr == nil)
-		}
-	}
-
 	if !argsPassed && (fs.NArg() == 0 || fs.Arg(0) == ".") {
 		if *ciMode {
 			if localOwner == "" || localRepo == "" {
@@ -662,12 +696,6 @@ func runReport(confPath string) {
 		}
 	menuLoop:
 		for {
-			if dashLoaded {
-				fmt.Println(renderDashboard(dashData))
-			} else if dashErr != nil {
-				color.HiBlack("  (Dashboard unavailable: %v)", dashErr)
-			}
-
 			history, _ := pipeline.LoadRepoHistory(historyPath)
 			
 			var opts []huh.Option[string]
