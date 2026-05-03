@@ -36,6 +36,7 @@ var (
 	Version   = "dev"
 	Commit    = "none"
 	BuildTime = "unknown"
+	latestRelease *selfupdate.Release
 )
 
 func printVersion() {
@@ -49,19 +50,20 @@ func sh(c string, a ...string) string {
 	return strings.TrimSpace(string(o))
 }
 
-func printBanner() {
-	fmt.Println()
-	color.Cyan(`   ____ _ _   _   _       _     ____                       _   `)
-	color.Cyan(`  / ___(_) |_| | | |_   _| |__ |  _ \ ___ _ __   ___  _ __| |_ `)
-	color.Cyan(` | |  _| | __| |_| | | | | '_ \| |_) / _ \ '_ \ / _ \| '__| __|`)
-	color.Cyan(` | |_| | | |_|  _  | |_| | |_) |  _ <  __/ |_) | (_) | |  | |_ `)
-	color.Cyan(`  \____|_|\__|_| |_|\__,_|_.__/|_| \_\___| .__/ \___/|_|   \__|`)
-	color.Cyan(`                                         |_|                   `)
-	color.Set(color.FgHiBlack)
-	fmt.Println("   AI-Powered GitHub Commit Summarizer")
-	fmt.Println("   ===================================")
-	color.Unset()
-	fmt.Println()
+func getBanner() string {
+	banner := `   ____ _ _   _   _       _     ____                       _   
+  / ___(_) |_| | | |_   _| |__ |  _ \ ___ _ __   ___  _ __| |_ 
+ | |  _| | __| |_| | | | | '_ \| |_) / _ \ '_ \ / _ \| '__| __|
+ | |_| | | |_|  _  | |_| | |_) |  _ <  __/ |_) | (_) | |  | |_ 
+  \____|_|\__|_| |_|\__,_|_.__/|_| \_\___| .__/ \___/|_|   \__|
+                                         |_|                   `
+
+	cyan := lipgloss.NewStyle().Foreground(lipgloss.Color("36"))  // Cyan
+	gray := lipgloss.NewStyle().Foreground(lipgloss.Color("241")) // Dark Gray
+
+	return "\n" + cyan.Render(banner) + "\n" +
+		gray.Render("   AI-Powered GitHub Commit Summarizer") + "\n" +
+		gray.Render("   ===================================") + "\n"
 }
 
 type menuItem struct {
@@ -98,10 +100,19 @@ func (m menuModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.choice = i.action
 			}
 			return m, tea.Quit
+		case "u":
+			if latestRelease != nil {
+				m.choice = "Update"
+				return m, tea.Quit
+			}
 		}
 	case tea.WindowSizeMsg:
 		h, v := docStyle.GetFrameSize()
-		m.list.SetSize(msg.Width-h, msg.Height-v)
+		bannerHeight := 10
+		if latestRelease != nil {
+			bannerHeight += 4
+		}
+		m.list.SetSize(msg.Width-h, msg.Height-v-bannerHeight)
 	}
 
 	var cmd tea.Cmd
@@ -113,7 +124,20 @@ func (m menuModel) View() string {
 	if m.quitting || m.choice != "" {
 		return ""
 	}
-	return docStyle.Render(m.list.View())
+	
+	view := getBanner()
+	if latestRelease != nil {
+		noticeStyle := lipgloss.NewStyle().
+			Border(lipgloss.RoundedBorder()).
+			BorderForeground(lipgloss.Color("42")).
+			Padding(0, 1).
+			MarginLeft(2)
+		
+		notice := fmt.Sprintf("🎉 Update Available: %s\nPress 'u' to update now", latestRelease.Version())
+		view += noticeStyle.Render(notice) + "\n"
+	}
+	
+	return view + "\n" + docStyle.Render(m.list.View())
 }
 
 type reportViewerModel struct {
@@ -248,8 +272,6 @@ func main() {
 	}
 
 	for {
-		printBanner()
-		
 		m := menuModel{list: list.New(items, list.NewDefaultDelegate(), 50, 14)}
 		m.list.Title = "Main Menu"
 		m.list.SetShowStatusBar(false)
@@ -268,7 +290,9 @@ func main() {
 			break
 		}
 
-		if finalModel.choice == "Report" {
+		if finalModel.choice == "Update" && latestRelease != nil {
+			doUpdate(latestRelease)
+		} else if finalModel.choice == "Report" {
 			runReport(confPath)
 		} else if finalModel.choice == "Setting" {
 			runSettings(confPath)
@@ -419,19 +443,20 @@ func checkForUpdates() {
 		return
 	}
 
-	fmt.Println()
-	color.Green("🎉 A new version of ghreport is available: %s (Current: %s)", latest.Version(), Version)
-	fmt.Println(color.HiBlackString("Release Notes: %s", latest.ReleaseNotes))
-	
-	var confirmUpdate bool
-	err = huh.NewConfirm().
-		Title("Would you like to update now?").
-		Affirmative("Yes, update!").
-		Negative("Not now").
-		Value(&confirmUpdate).
-		Run()
+	latestRelease = latest
+}
 
-	if err != nil || !confirmUpdate {
+func doUpdate(latest *selfupdate.Release) {
+	spin := spinner.New(spinner.CharSets[14], 100*time.Millisecond)
+	_ = spin.Color("cyan", "bold")
+
+	source, err := selfupdate.NewGitHubSource(selfupdate.GitHubConfig{})
+	if err != nil {
+		return
+	}
+
+	updater, err := selfupdate.NewUpdater(selfupdate.Config{Source: source})
+	if err != nil {
 		return
 	}
 
