@@ -549,20 +549,130 @@ func runReport(confPath string) {
 	
 	_ = fs.Parse(os.Args[1:])
 
-	if *owner == "" || *repo == "" || (fs.NArg() > 0 && fs.Arg(0) == ".") {
-		u := sh("git", "remote", "get-url", "origin")
+	argsPassed := *owner != "" && *repo != ""
+
+	// Try local git repo
+	localOwner, localRepo := "", ""
+	u := sh("git", "remote", "get-url", "origin")
+	if u != "" {
 		u = strings.TrimPrefix(strings.TrimPrefix(u, "https://github.com/"), "git@github.com:")
 		u = strings.TrimSuffix(u, ".git")
 		p := strings.Split(u, "/")
 		if len(p) >= 2 {
-			if *owner == "" {
-				*owner = p[0]
-			}
-			if *repo == "" {
-				*repo = p[1]
-			}
+			localOwner = p[0]
+			localRepo = p[1]
 		}
 	}
+
+	h, _ := os.UserHomeDir()
+	historyPath := h + "/.ghreport_history.json"
+
+	if !argsPassed && (fs.NArg() == 0 || fs.Arg(0) == ".") {
+	menuLoop:
+		for {
+			history, _ := pipeline.LoadRepoHistory(historyPath)
+			
+			var opts []huh.Option[string]
+			if localOwner != "" && localRepo != "" {
+				opts = append(opts, huh.NewOption(fmt.Sprintf("📍 Current Directory (%s/%s)", localOwner, localRepo), fmt.Sprintf("%s/%s", localOwner, localRepo)))
+			}
+			
+			for _, hItem := range history {
+				val := fmt.Sprintf("%s/%s", hItem.Owner, hItem.Repo)
+				// Don't duplicate current dir in history list
+				if val != fmt.Sprintf("%s/%s", localOwner, localRepo) {
+					opts = append(opts, huh.NewOption(fmt.Sprintf("🕒 %s", val), val))
+				}
+			}
+			opts = append(opts, huh.NewOption("➕ Enter New Repository...", "new"))
+			if len(history) > 0 {
+				opts = append(opts, huh.NewOption("🗑️ Manage History (Delete Repo)", "manage"))
+			}
+			opts = append(opts, huh.NewOption("❌ Cancel", "exit"))
+
+			var selected string
+			err := huh.NewSelect[string]().
+				Title("Select Repository to Analyze").
+				Options(opts...).
+				Value(&selected).
+				Run()
+
+			if err != nil || selected == "exit" {
+				return
+			}
+
+			if selected == "manage" {
+				var delOpts []huh.Option[string]
+				for _, hItem := range history {
+					val := fmt.Sprintf("%s/%s", hItem.Owner, hItem.Repo)
+					delOpts = append(delOpts, huh.NewOption(fmt.Sprintf("🗑️ %s", val), val))
+				}
+				delOpts = append(delOpts, huh.NewOption("🔙 Back", "back"))
+
+				var toDelete string
+				err = huh.NewSelect[string]().
+					Title("Select Repository to Delete from History").
+					Options(delOpts...).
+					Value(&toDelete).
+					Run()
+
+				if err == nil && toDelete != "back" {
+					var newHistory []pipeline.RepoHistory
+					for _, hItem := range history {
+						val := fmt.Sprintf("%s/%s", hItem.Owner, hItem.Repo)
+						if val != toDelete {
+							newHistory = append(newHistory, hItem)
+						}
+					}
+					_ = pipeline.SaveRepoHistory(historyPath, newHistory)
+					color.Yellow("🗑️ Repository removed from history.")
+				}
+				continue menuLoop
+			}
+
+			if selected == "new" {
+				err = huh.NewInput().
+					Title("Enter GitHub URL or owner/repo").
+					Description("Examples:\ngit@github.com:sakatimuna7/github-report.git\nhttps://github.com/sakatimuna7/github-report.git\nsakatimuna7/github-report").
+					Value(&selected).
+					Run()
+				if err != nil || selected == "" {
+					return
+				}
+			}
+
+			uStr := selected
+			uStr = strings.TrimPrefix(strings.TrimPrefix(uStr, "https://github.com/"), "git@github.com:")
+			uStr = strings.TrimSuffix(uStr, ".git")
+			parts := strings.Split(uStr, "/")
+			if len(parts) >= 2 {
+				*owner = parts[len(parts)-2]
+				*repo = parts[len(parts)-1]
+			}
+			break
+		}
+	} else if *owner == "" || *repo == "" {
+		if *owner == "" { *owner = localOwner }
+		if *repo == "" { *repo = localRepo }
+	}
+	
+	if *owner == "" || *repo == "" {
+		color.Red("❌ Could not determine repository. Use --owner and --repo flags.")
+		return
+	}
+
+	// Save to history
+	history, _ := pipeline.LoadRepoHistory(historyPath)
+	newHistory := []pipeline.RepoHistory{{Owner: *owner, Repo: *repo, LastUsed: time.Now()}}
+	for _, hItem := range history {
+		if hItem.Owner != *owner || hItem.Repo != *repo {
+			newHistory = append(newHistory, hItem)
+		}
+	}
+	if len(newHistory) > 10 {
+		newHistory = newHistory[:10]
+	}
+	_ = pipeline.SaveRepoHistory(historyPath, newHistory)
 	if *branch == "" {
 		*branch = sh("git", "rev-parse", "--abbrev-ref", "HEAD")
 	}

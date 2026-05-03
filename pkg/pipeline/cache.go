@@ -150,3 +150,30 @@ func LoadReportResult(path string) (ReportResult, error) {
 	err = json.Unmarshal(data, &result)
 	return result, err
 }
+
+// RepoHistory tracks a previously analyzed repository
+type RepoHistory struct {
+	Owner    string    `json:"owner"`
+	Repo     string    `json:"repo"`
+	LastUsed time.Time `json:"last_used"`
+}
+
+// LoadRepoHistory loads the repository history from a JSON file
+func LoadRepoHistory(path string) ([]RepoHistory, error) {
+	var history []RepoHistory
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return history, err
+	}
+	err = json.Unmarshal(data, &history)
+	return history, err
+}
+
+// SaveRepoHistory saves the repository history to a JSON file
+func SaveRepoHistory(path string, history []RepoHistory) error {
+	data, err := json.Marshal(history)
+	if err != nil {
+		return err
+	}
+	return os.WriteFile(path, data, 0644)
+}
