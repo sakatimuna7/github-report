@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"os"
 	"sync"
+	"time"
 )
 
 // SummaryCache is an interface for caching LLM summaries by content hash.
@@ -114,4 +115,38 @@ func (c *FileCache) Size() int {
 	c.mem.mu.RLock()
 	defer c.mem.mu.RUnlock()
 	return len(c.mem.data)
+}
+
+// ReportResult represents a fully generated report with its metadata.
+type ReportResult struct {
+	Content      string    `json:"content"`
+	Timestamp    time.Time `json:"timestamp"`
+	Model        string    `json:"model"`
+	Period       string    `json:"period"`
+	Focus        string    `json:"focus"`
+	TotalCommits int       `json:"total_commits"`
+	Features     int       `json:"features"`
+	Fixes        int       `json:"fixes"`
+	Overtime     int       `json:"overtime"`
+	Usage        string    `json:"usage"` // Token usage info
+}
+
+// SaveReportResult saves a report to a file.
+func SaveReportResult(path string, result ReportResult) error {
+	data, err := json.Marshal(result)
+	if err != nil {
+		return err
+	}
+	return os.WriteFile(path, data, 0644)
+}
+
+// LoadReportResult loads a report from a file.
+func LoadReportResult(path string) (ReportResult, error) {
+	var result ReportResult
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return result, err
+	}
+	err = json.Unmarshal(data, &result)
+	return result, err
 }

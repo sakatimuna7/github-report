@@ -670,7 +670,6 @@ func runReport(confPath string) {
 	}
 
 	// Confirmation Step
-	var proceed bool
 	
 	columns := []table.Column{
 		{Title: "Total Commits", Width: 15},
@@ -720,6 +719,15 @@ func runReport(confPath string) {
 
 	summary := tableStyle.Render(t.View())
 
+	// Check for cached final report
+	reportsCacheDir := h + "/.ghreport_reports"
+	_ = os.MkdirAll(reportsCacheDir, 0755)
+	cacheKey := fmt.Sprintf("%s_%s_%s_%s", *owner, *repo, *branch, s.Format("2006-01-02"))
+	cacheFile := reportsCacheDir + "/" + pipeline.ContentHash(cacheKey) + ".json"
+	
+	cachedResult, errCache := pipeline.LoadReportResult(cacheFile)
+	hasCache := errCache == nil
+
 	// Selection Table
 	selColumns := []table.Column{
 		{Title: "AI Model", Width: 15},
@@ -738,33 +746,82 @@ func runReport(confPath string) {
 	stbl.SetStyles(st)
 	selectionSummary := tableStyle.Render(stbl.View())
 
-	err = huh.NewForm(
-		huh.NewGroup(
+	var cacheNote string
+	if hasCache {
+		cacheNote = fmt.Sprintf(
+			"📅 Generated at: %s\n🤖 Model used: %s\n🎯 Focus: %s\n📊 Stats: %d commits, %d feats, %d fixes",
+			cachedResult.Timestamp.Format("2006-01-02 15:04"),
+			cachedResult.Model,
+			cachedResult.Focus,
+			cachedResult.TotalCommits, cachedResult.Features, cachedResult.Fixes,
+		)
+	}
+
+	var action string
+	var fields []huh.Field
+	
+	fields = append(fields, 
+		huh.NewNote().
+			Title("Review Selections").
+			Description(selectionSummary),
+		huh.NewNote().
+			Title("Commit Statistics").
+			Description(summary),
+	)
+
+	if hasCache {
+		fields = append(fields,
 			huh.NewNote().
-				Title("Review Selections").
-				Description(selectionSummary),
-			huh.NewNote().
-				Title("Commit Statistics").
-				Description(summary),
+				Title("✨ Cached Report Found").
+				Description(cacheNote),
+			huh.NewSelect[string]().
+				Title("What would you like to do?").
+				Options(
+					huh.NewOption("Use Cached Report", "cache"),
+					huh.NewOption("Regenerate (New AI Call)", "regen_ai"),
+					huh.NewOption("Go Back / Cancel", "back"),
+				).
+				Value(&action),
+		)
+	} else {
+		var proceed bool
+		fields = append(fields,
 			huh.NewConfirm().
 				Title("Proceed to generate AI report?").
 				Affirmative("Yes, execute").
 				Negative("No, go back").
 				Value(&proceed),
-		),
-	).Run()
+		)
+		err = huh.NewForm(huh.NewGroup(fields...)).Run()
+		if proceed {
+			action = "regen_ai"
+		} else {
+			action = "back"
+		}
+	}
 
-	if err != nil || !proceed {
+	if hasCache {
+		err = huh.NewForm(huh.NewGroup(fields...)).Run()
+	}
+
+	if err != nil || action == "back" {
 		continue
 	}
 
-	fmt.Println()
-	color.Cyan("╭────────────────────────────────────────╮")
-	color.Cyan("│ 🚀 GENERATING REPORT                   │")
-	color.Cyan("╰────────────────────────────────────────╯")
-
+	reportContent := ""
 	var usage ai.Usage
-	var mu sync.Mutex
+	
+	if action == "cache" {
+		reportContent = cachedResult.Content
+		// We don't have token usage from cache unless we saved it
+		fmt.Println(color.GreenString("\n✅ Using cached report from %s", cachedResult.Timestamp.Format("2006-01-02 15:04")))
+	} else {
+		fmt.Println()
+		color.Cyan("╭────────────────────────────────────────╮")
+		color.Cyan("│ 🚀 GENERATING REPORT                   │")
+		color.Cyan("╰────────────────────────────────────────╯")
+		
+		var mu sync.Mutex
 	call := func(m, sp, d string) (string, error) {
 		var res string
 		var use ai.Usage
@@ -834,7 +891,22 @@ func runReport(confPath string) {
 	report, _ := fb(mm, sp, merged)
 	spin.Stop()
 
-	reportContent := fmt.Sprintf("%s\n\nUsage: %d Prompt | %d Completion | %d Total Tokens\n", report, usage.PromptTokens, usage.CompletionTokens, usage.TotalTokens)
+	reportContent = fmt.Sprintf("%s\n\nUsage: %d Prompt | %d Completion | %d Total Tokens\n", report, usage.PromptTokens, usage.CompletionTokens, usage.TotalTokens)
+	
+	// Save to cache
+	_ = pipeline.SaveReportResult(cacheFile, pipeline.ReportResult{
+		Content:      reportContent,
+		Timestamp:    time.Now(),
+		Model:        *mod,
+		Period:       dr,
+		Focus:        fr,
+		TotalCommits: stats.Total,
+		Features:     stats.Features,
+		Fixes:        stats.Fixes,
+		Overtime:     stats.Overtime,
+		Usage:        fmt.Sprintf("%d Prompt | %d Completion | %d Total Tokens", usage.PromptTokens, usage.CompletionTokens, usage.TotalTokens),
+	})
+	}
 
 	p := tea.NewProgram(
 		reportViewerModel{content: reportContent},
