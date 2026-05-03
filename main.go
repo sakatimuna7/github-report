@@ -727,6 +727,11 @@ func runReport(confPath string) {
 	
 	cachedResult, errCache := pipeline.LoadReportResult(cacheFile)
 	hasCache := errCache == nil
+	
+	// TTL Check: 24 hours
+	if hasCache && time.Since(cachedResult.Timestamp) > 24*time.Hour {
+		hasCache = false
+	}
 
 	// Selection Table
 	selColumns := []table.Column{
