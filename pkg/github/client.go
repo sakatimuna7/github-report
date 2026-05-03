@@ -31,7 +31,7 @@ type CommitStats struct {
 	Overtime int
 }
 
-func (c *Client) GetReportData(ctx context.Context, owner, repo, branch string, limit int, since, until time.Time) (string, CommitStats, error) {
+func (c *Client) GetReportData(ctx context.Context, owner, repo, branch string, limit int, since, until time.Time, workStart, workEnd int) (string, CommitStats, error) {
 	var allCommits []*github.RepositoryCommit
 	
 	opts := &github.CommitsListOptions{
@@ -86,10 +86,10 @@ func (c *Client) GetReportData(ctx context.Context, owner, repo, branch string, 
 			stats.Fixes++
 		}
 		
-		// Overtime check: 6 PM to 8 AM
+		// Overtime check: Outside workStart to workEnd
 		date := commit.GetCommit().GetAuthor().GetDate()
 		hour := date.Hour()
-		if hour >= 18 || hour < 8 {
+		if hour >= workEnd || hour < workStart {
 			stats.Overtime++
 		}
 

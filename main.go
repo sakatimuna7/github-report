@@ -315,9 +315,16 @@ func runSettings(path string) {
 			gmS = color.GreenString("Configured")
 		}
 
+		ws := os.Getenv("WORK_START")
+		we := os.Getenv("WORK_END")
+		if ws == "" { ws = "9" }
+		if we == "" { we = "17" }
+
 		items := []list.Item{
 			menuItem{title: "Groq API Key", desc: "Status: " + gkS, action: "Groq"},
 			menuItem{title: "Gemini API Key", desc: "Status: " + gmS, action: "Gemini"},
+			menuItem{title: "🕒 Work Start", desc: "Currently: " + ws + ":00", action: "WorkStart"},
+			menuItem{title: "🕔 Work End", desc: "Currently: " + we + ":00", action: "WorkEnd"},
 			menuItem{title: "⬅️  Back", desc: "Return to Main Menu", action: "Back"},
 		}
 
@@ -349,9 +356,21 @@ func runSettings(path string) {
 			if res != "" {
 				os.Setenv("GEMINI_API_KEY", res)
 			}
+		} else if finalModel.choice == "WorkStart" {
+			huh.NewInput().Title("Enter Work Start Hour (0-23)").Value(&res).Run()
+			if res != "" {
+				os.Setenv("WORK_START", res)
+			}
+		} else if finalModel.choice == "WorkEnd" {
+			huh.NewInput().Title("Enter Work End Hour (0-23)").Value(&res).Run()
+			if res != "" {
+				os.Setenv("WORK_END", res)
+			}
 		}
 
-		content := fmt.Sprintf("GROQ_API_KEY=%s\nGEMINI_API_KEY=%s\n", os.Getenv("GROQ_API_KEY"), os.Getenv("GEMINI_API_KEY"))
+		content := fmt.Sprintf("GROQ_API_KEY=%s\nGEMINI_API_KEY=%s\nWORK_START=%s\nWORK_END=%s\n", 
+			os.Getenv("GROQ_API_KEY"), os.Getenv("GEMINI_API_KEY"), 
+			os.Getenv("WORK_START"), os.Getenv("WORK_END"))
 		
 		h, _ := os.UserHomeDir()
 		encKey := getEncryptionKey(h)
@@ -635,7 +654,15 @@ func runReport(confPath string) {
 	_ = spin.Color("cyan", "bold")
 	spin.Suffix = color.HiBlackString(" Fetching GitHub Data...")
 	spin.Start()
-	raw, stats, err := github.NewClient(*tok).GetReportData(c, *owner, *repo, *branch, *lim, s, u)
+	ws, we := 9, 17
+	if s := os.Getenv("WORK_START"); s != "" {
+		fmt.Sscanf(s, "%d", &ws)
+	}
+	if s := os.Getenv("WORK_END"); s != "" {
+		fmt.Sscanf(s, "%d", &we)
+	}
+
+	raw, stats, err := github.NewClient(*tok).GetReportData(c, *owner, *repo, *branch, *lim, s, u, ws, we)
 	spin.Stop()
 	if err != nil {
 		fmt.Printf(color.RedString("Error: %v\n", err))
@@ -646,46 +673,76 @@ func runReport(confPath string) {
 	var proceed bool
 	
 	columns := []table.Column{
-		{Title: "Category", Width: 25},
-		{Title: "Count", Width: 10},
+		{Title: "Total Commits", Width: 15},
+		{Title: "Features", Width: 10},
+		{Title: "Fixes", Width: 10},
+		{Title: "Overtime", Width: 10},
 	}
 
 	rows := []table.Row{
-		{"Total Commits", fmt.Sprintf("%d", stats.Total)},
-		{"Features", fmt.Sprintf("%d", stats.Features)},
-		{"Fixes", fmt.Sprintf("%d", stats.Fixes)},
-		{"Overtime", fmt.Sprintf("%d", stats.Overtime)},
+		{
+			fmt.Sprintf("%d", stats.Total),
+			fmt.Sprintf("%d", stats.Features),
+			fmt.Sprintf("%d", stats.Fixes),
+			fmt.Sprintf("%d", stats.Overtime),
+		},
 	}
 
 	t := table.New(
 		table.WithColumns(columns),
 		table.WithRows(rows),
 		table.WithFocused(false),
-		table.WithHeight(5),
+		table.WithHeight(3),
 	)
 
+	purple := lipgloss.Color("99")
 	st := table.DefaultStyles()
 	st.Header = st.Header.
 		BorderStyle(lipgloss.NormalBorder()).
-		BorderForeground(lipgloss.Color("240")).
+		BorderForeground(purple).
 		BorderBottom(true).
+		BorderLeft(true).
+		BorderRight(true).
+		BorderTop(true).
+		Foreground(purple).
 		Bold(true)
-	st.Selected = lipgloss.NewStyle() // Disable selection style for static view
+	st.Cell = st.Cell.
+		BorderStyle(lipgloss.NormalBorder()).
+		BorderForeground(purple).
+		BorderLeft(true).
+		BorderRight(true).
+		BorderBottom(true)
+	st.Selected = lipgloss.NewStyle()
 	t.SetStyles(st)
 
 	tableStyle := lipgloss.NewStyle().
-		Border(lipgloss.RoundedBorder()).
-		BorderForeground(lipgloss.Color("36")).
-		Padding(0, 1).
 		MarginBottom(1)
 
 	summary := tableStyle.Render(t.View())
+
+	// Selection Table
+	selColumns := []table.Column{
+		{Title: "AI Model", Width: 15},
+		{Title: "Period", Width: 15},
+		{Title: "Focus", Width: 15},
+	}
+	selRows := []table.Row{
+		{*mod, dr, fr},
+	}
+	stbl := table.New(
+		table.WithColumns(selColumns),
+		table.WithRows(selRows),
+		table.WithFocused(false),
+		table.WithHeight(3),
+	)
+	stbl.SetStyles(st)
+	selectionSummary := tableStyle.Render(stbl.View())
 
 	err = huh.NewForm(
 		huh.NewGroup(
 			huh.NewNote().
 				Title("Review Selections").
-				Description(fmt.Sprintf("Model: %s\nPeriod: %s\nFocus: %s", *mod, dr, fr)),
+				Description(selectionSummary),
 			huh.NewNote().
 				Title("Commit Statistics").
 				Description(summary),

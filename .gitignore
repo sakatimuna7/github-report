@@ -1,5 +1,5 @@
 # Binaries
-ghreport
+ghreport*
 *.exe
 *.exe~
 *.dll
