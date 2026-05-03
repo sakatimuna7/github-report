@@ -14,7 +14,7 @@ all: build
 
 build:
 	@echo "Building $(BINARY_NAME) $(VERSION)..."
-	@go build -ldflags "$(LDFLAGS)" -o $(BINARY_NAME) main.go
+	@go build -ldflags "$(LDFLAGS)" -o $(BINARY_NAME) .
 
 install: build
 	@echo "Installing $(BINARY_NAME) to $(INSTALL_PATH)..."
@@ -33,13 +33,13 @@ release:
 	@echo "Creating release builds..."
 	@mkdir -p dist
 	# macOS (Apple Silicon)
-	GOOS=darwin GOARCH=arm64 go build -ldflags "$(LDFLAGS)" -o dist/$(BINARY_NAME)-darwin-arm64 main.go
+	GOOS=darwin GOARCH=arm64 go build -ldflags "$(LDFLAGS)" -o dist/$(BINARY_NAME)-darwin-arm64 .
 	# macOS (Intel)
-	GOOS=darwin GOARCH=amd64 go build -ldflags "$(LDFLAGS)" -o dist/$(BINARY_NAME)-darwin-amd64 main.go
+	GOOS=darwin GOARCH=amd64 go build -ldflags "$(LDFLAGS)" -o dist/$(BINARY_NAME)-darwin-amd64 .
 	# Linux (AMD64)
-	GOOS=linux GOARCH=amd64 go build -ldflags "$(LDFLAGS)" -o dist/$(BINARY_NAME)-linux-amd64 main.go
+	GOOS=linux GOARCH=amd64 go build -ldflags "$(LDFLAGS)" -o dist/$(BINARY_NAME)-linux-amd64 .
 	# Windows (AMD64)
-	GOOS=windows GOARCH=amd64 go build -ldflags "$(LDFLAGS)" -o dist/$(BINARY_NAME)-windows-amd64.exe main.go
+	GOOS=windows GOARCH=amd64 go build -ldflags "$(LDFLAGS)" -o dist/$(BINARY_NAME)-windows-amd64.exe .
 	@echo "Release builds created in dist/"
 
 publish:

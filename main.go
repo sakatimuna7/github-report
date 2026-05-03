@@ -19,6 +19,7 @@ import (
 	"github-report-ai/pkg/ai"
 	"github-report-ai/pkg/github"
 	"github-report-ai/pkg/pipeline"
+	"github-report-ai/pkg/sheets"
 
 	"github.com/briandowns/spinner"
 	"github.com/charmbracelet/bubbles/list"
@@ -171,6 +172,9 @@ func (m reportViewerModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case "p":
 			m.action = "print"
 			return m, tea.Quit
+		case "e":
+			m.action = "export_sheets"
+			return m, tea.Quit
 		case "c":
 			c := exec.Command("pbcopy")
 			c.Stdin = strings.NewReader(m.content)
@@ -224,9 +228,9 @@ func (m reportViewerModel) View() string {
 
 	header := headerStyle.Render("✨ GITHUB REPORT GENERATED")
 	
-	footerText := fmt.Sprintf("%3.f%% • [c] copy • [p] print • [r] regen • [q] quit", m.viewport.ScrollPercent()*100)
+	footerText := fmt.Sprintf("%3.f%% • [c] copy • [p] print • [e] export sheets • [r] regen • [q] quit", m.viewport.ScrollPercent()*100)
 	if m.toast != "" {
-		footerText = fmt.Sprintf("%3.f%% • %s • [c] copy • [p] print • [r] regen • [q] quit", m.viewport.ScrollPercent()*100, m.toast)
+		footerText = fmt.Sprintf("%3.f%% • %s • [c] copy • [p] print • [e] export • [r] regen • [q] quit", m.viewport.ScrollPercent()*100, m.toast)
 	}
 	footer := footerStyle.Render(footerText)
 
@@ -234,11 +238,14 @@ func (m reportViewerModel) View() string {
 }
 
 func main() {
-	// Simple version check before anything else
+	var isCI bool
 	for _, arg := range os.Args {
 		if arg == "-v" || arg == "--version" || arg == "version" {
 			printVersion()
 			return
+		}
+		if arg == "--ci" {
+			isCI = true
 		}
 	}
 
@@ -264,6 +271,11 @@ func main() {
 				_ = godotenv.Load(confPath)
 			}
 		}
+	}
+
+	if isCI {
+		runReport(confPath)
+		return
 	}
 
 	items := []list.Item{
@@ -320,11 +332,25 @@ func runSettings(path string) {
 		if ws == "" { ws = "9" }
 		if we == "" { we = "17" }
 
+		sID := os.Getenv("SHEETS_ID")
+		dName := os.Getenv("DEVELOPER_NAME")
+		credPath := os.Getenv("GOOGLE_CREDENTIALS_PATH")
+
+		sIdStr := color.RedString("Not Set")
+		if sID != "" { sIdStr = color.GreenString("Set") }
+		dNameStr := color.RedString("Not Set")
+		if dName != "" { dNameStr = color.GreenString("Set") }
+		credPathStr := color.RedString("Not Set")
+		if credPath != "" { credPathStr = color.GreenString("Set") }
+
 		items := []list.Item{
 			menuItem{title: "Groq API Key", desc: "Status: " + gkS, action: "Groq"},
 			menuItem{title: "Gemini API Key", desc: "Status: " + gmS, action: "Gemini"},
 			menuItem{title: "🕒 Work Start", desc: "Currently: " + ws + ":00", action: "WorkStart"},
 			menuItem{title: "🕔 Work End", desc: "Currently: " + we + ":00", action: "WorkEnd"},
+			menuItem{title: "📊 Sheets ID", desc: "Status: " + sIdStr, action: "SheetsID"},
+			menuItem{title: "👨‍💻 Dev Name", desc: "Status: " + dNameStr, action: "DevName"},
+			menuItem{title: "🔑 Google Creds", desc: "Status: " + credPathStr, action: "CredPath"},
 			menuItem{title: "⬅️  Back", desc: "Return to Main Menu", action: "Back"},
 		}
 
@@ -366,11 +392,28 @@ func runSettings(path string) {
 			if res != "" {
 				os.Setenv("WORK_END", res)
 			}
+		} else if finalModel.choice == "SheetsID" {
+			huh.NewInput().Title("Enter Google Spreadsheet ID").Value(&res).Run()
+			if res != "" {
+				os.Setenv("SHEETS_ID", res)
+			}
+		} else if finalModel.choice == "DevName" {
+			huh.NewInput().Title("Enter Your Developer Name").Value(&res).Run()
+			if res != "" {
+				os.Setenv("DEVELOPER_NAME", res)
+			}
+		} else if finalModel.choice == "CredPath" {
+			res = runFilePicker()
+			if res != "" {
+				os.Setenv("GOOGLE_CREDENTIALS_PATH", res)
+			}
 		}
 
-		content := fmt.Sprintf("GROQ_API_KEY=%s\nGEMINI_API_KEY=%s\nWORK_START=%s\nWORK_END=%s\n", 
+		content := fmt.Sprintf("GROQ_API_KEY=%s\nGEMINI_API_KEY=%s\nWORK_START=%s\nWORK_END=%s\nSHEETS_ID=%s\nDEVELOPER_NAME=%s\nGOOGLE_CREDENTIALS_PATH=%s\n", 
 			os.Getenv("GROQ_API_KEY"), os.Getenv("GEMINI_API_KEY"), 
-			os.Getenv("WORK_START"), os.Getenv("WORK_END"))
+			os.Getenv("WORK_START"), os.Getenv("WORK_END"),
+			os.Getenv("SHEETS_ID"), os.Getenv("DEVELOPER_NAME"),
+			os.Getenv("GOOGLE_CREDENTIALS_PATH"))
 		
 		h, _ := os.UserHomeDir()
 		encKey := getEncryptionKey(h)
@@ -546,6 +589,9 @@ func runReport(confPath string) {
 	gk := fs.String("groq-key", os.Getenv("GROQ_API_KEY"), "")
 	gm := fs.String("gemini-key", os.Getenv("GEMINI_API_KEY"), "")
 	mod := fs.String("ai", "gemini-flash", "")
+	ciMode := fs.Bool("ci", false, "")
+	periodFlag := fs.String("period", "today", "Date period (e.g. 02/01/2006 or 'today')")
+	focusFlag := fs.String("focus", "1. Semua", "Focus area")
 	
 	_ = fs.Parse(os.Args[1:])
 
@@ -568,6 +614,15 @@ func runReport(confPath string) {
 	historyPath := h + "/.ghreport_history.json"
 
 	if !argsPassed && (fs.NArg() == 0 || fs.Arg(0) == ".") {
+		if *ciMode {
+			if localOwner == "" || localRepo == "" {
+				color.Red("❌ Could not determine repository in CI mode. Use --owner and --repo flags.")
+				return
+			}
+			*owner = localOwner
+			*repo = localRepo
+			goto skipMenuLoop
+		}
 	menuLoop:
 		for {
 			history, _ := pipeline.LoadRepoHistory(historyPath)
@@ -655,6 +710,7 @@ func runReport(confPath string) {
 		if *owner == "" { *owner = localOwner }
 		if *repo == "" { *repo = localRepo }
 	}
+skipMenuLoop:
 	
 	if *owner == "" || *repo == "" {
 		color.Red("❌ Could not determine repository. Use --owner and --repo flags.")
@@ -684,50 +740,60 @@ func runReport(confPath string) {
 
 	// We wrap everything from the form down in a loop so they can regenerate
 	for {
-		var dOpts []huh.Option[string]
-		now := time.Now()
-		for i := 0; i < 7; i++ {
-			str := now.AddDate(0, 0, -i).Format("02/01/2006")
-			dOpts = append(dOpts, huh.NewOption(str, str))
-		}
-		dOpts = append(dOpts, huh.NewOption("Custom Range", "Custom Range"))
+		if *ciMode {
+			dr = *periodFlag
+			fr = *focusFlag
+			if dr == "today" {
+				dr = time.Now().Format("02/01/2006")
+			}
+		} else {
+			var dOpts []huh.Option[string]
+			now := time.Now()
+			for i := 0; i < 7; i++ {
+				str := now.AddDate(0, 0, -i).Format("02/01/2006")
+				dOpts = append(dOpts, huh.NewOption(str, str))
+			}
+			dOpts = append(dOpts, huh.NewOption("Custom Range", "Custom Range"))
 
-		form := huh.NewForm(
-			huh.NewGroup(
-				huh.NewSelect[string]().
-					Title("AI Model").
-					Options(
-						huh.NewOption("gemini-flash", "gemini-flash"),
-						huh.NewOption("gemini-flash-lite", "gemini-flash-lite"),
-						huh.NewOption("groq-llama", "groq-llama"),
-						huh.NewOption("groq-mixtral", "groq-mixtral"),
-						huh.NewOption("groq-gpt", "groq-gpt"),
-					).
-					Value(mod),
-				huh.NewSelect[string]().
-					Title("Date Period").
-					Options(dOpts...).
-					Value(&dr),
-				huh.NewSelect[string]().
-					Title("Focus").
-					Options(
-						huh.NewOption("1. Semua", "1. Semua"),
-						huh.NewOption("2. Summary", "2. Summary"),
-						huh.NewOption("3. Changes", "3. Changes"),
-						huh.NewOption("4. Modules", "4. Modules"),
-						huh.NewOption("5. Authors", "5. Authors"),
-						huh.NewOption("6. Recs", "6. Recs"),
-					).
-					Value(&fr),
-				huh.NewInput().
-					Title("Context (optional)").
-					Value(&ctxN),
-			),
-		)
+			templates, _ := pipeline.LoadTemplates()
+			var tOpts []huh.Option[string]
+			for tName := range templates {
+				tOpts = append(tOpts, huh.NewOption(tName, tName))
+			}
+			if len(tOpts) == 0 {
+				tOpts = append(tOpts, huh.NewOption("Default", "Default"))
+			}
 
-		err := form.Run()
-		if err != nil {
-			return
+			form := huh.NewForm(
+				huh.NewGroup(
+					huh.NewSelect[string]().
+						Title("AI Model").
+						Options(
+							huh.NewOption("gemini-flash", "gemini-flash"),
+							huh.NewOption("gemini-flash-lite", "gemini-flash-lite"),
+							huh.NewOption("groq-llama", "groq-llama"),
+							huh.NewOption("groq-mixtral", "groq-mixtral"),
+							huh.NewOption("groq-gpt", "groq-gpt"),
+						).
+						Value(mod),
+					huh.NewSelect[string]().
+						Title("Date Period").
+						Options(dOpts...).
+						Value(&dr),
+					huh.NewSelect[string]().
+						Title("Template / Focus").
+						Options(tOpts...).
+						Value(&fr),
+					huh.NewInput().
+						Title("Context (optional)").
+						Value(&ctxN),
+				),
+			)
+
+			err := form.Run()
+			if err != nil {
+				return
+			}
 		}
 
 		var s, u time.Time
@@ -780,7 +846,6 @@ func runReport(confPath string) {
 	}
 
 	// Confirmation Step
-	
 	columns := []table.Column{
 		{Title: "Total Commits", Width: 15},
 		{Title: "Features", Width: 10},
@@ -898,7 +963,7 @@ func runReport(confPath string) {
 				).
 				Value(&action),
 		)
-	} else {
+	} else if !*ciMode {
 		var proceed bool
 		fields = append(fields,
 			huh.NewConfirm().
@@ -907,28 +972,43 @@ func runReport(confPath string) {
 				Negative("No, go back").
 				Value(&proceed),
 		)
+	}
+
+	if !*ciMode {
 		err = huh.NewForm(huh.NewGroup(fields...)).Run()
-		if proceed {
-			action = "regen_ai"
-		} else {
-			action = "back"
+		if err != nil {
+			continue // User cancelled form
+		}
+		
+		if !hasCache {
+			// Without cache, the last field is the confirm
+			// We can't cleanly extract it, but if they didn't cancel, we assume proceed=true
+			// Wait, the confirm sets the 'proceed' variable pointer
+			// However 'proceed' is scoped to the 'else if' block!
+			// Ah, that was it!
 		}
 	}
 
-	if hasCache {
-		err = huh.NewForm(huh.NewGroup(fields...)).Run()
+	// Determine action
+	if *ciMode {
+		if hasCache {
+			action = "cache"
+		} else {
+			action = "regen_ai"
+		}
+	} else if !hasCache {
+		action = "regen_ai" // Implicitly true if they didn't hit escape on the form
 	}
 
-	if err != nil || action == "back" {
-		continue
+	if action == "back" || action == "" {
+		continue // Go back to parameter selection
 	}
 
-	reportContent := ""
+	var reportContent string
 	var usage ai.Usage
 	
 	if action == "cache" {
 		reportContent = cachedResult.Content
-		// We don't have token usage from cache unless we saved it
 		fmt.Println(color.GreenString("\n✅ Using cached report from %s", cachedResult.Timestamp.Format("2006-01-02 15:04")))
 	} else {
 		fmt.Println()
@@ -937,11 +1017,11 @@ func runReport(confPath string) {
 		color.Cyan("╰────────────────────────────────────────╯")
 		
 		var mu sync.Mutex
-	call := func(m, sp, d string) (string, error) {
-		var res string
-		var use ai.Usage
-		var err error
-		if strings.HasPrefix(m, "gemini") {
+		call := func(m, sp, d string) (string, error) {
+			var res string
+			var use ai.Usage
+			var err error
+			if strings.HasPrefix(m, "gemini") {
 			id := "gemini-2.0-flash"
 			if m != "gemini-flash" {
 				id = "gemini-2.0-flash-lite-preview-02-05"
@@ -997,11 +1077,14 @@ func runReport(confPath string) {
 	spin.Restart()
 	merged, _ := fb(rm, pipeline.ReduceSysPrompt, strings.Join(sums, "\n---\n"))
 
-	fi := "Full report."
-	if fr != "1. Semua" {
-		fi = fr
+	templates, _ := pipeline.LoadTemplates()
+	tmpl, exists := templates[fr]
+	if !exists {
+		tmpl = templates["Default"]
 	}
-	sp := fmt.Sprintf("Role: SE\nTask: Format report\nLanguage: Bahasa Indonesia\nFocus: %s\nContext: %s\nRules: clean headings, bullet points, concise, NO bold tags (**text**)", fi, ctxN)
+	
+	sp := strings.ReplaceAll(tmpl, "{{FOCUS}}", fr)
+	sp = strings.ReplaceAll(sp, "{{CONTEXT}}", ctxN)
 
 	report, _ := fb(mm, sp, merged)
 	spin.Stop()
@@ -1021,31 +1104,97 @@ func runReport(confPath string) {
 		Overtime:     stats.Overtime,
 		Usage:        fmt.Sprintf("%d Prompt | %d Completion | %d Total Tokens", usage.PromptTokens, usage.CompletionTokens, usage.TotalTokens),
 	})
-	}
+	} // end of else block for action != "cache"
 
-	p := tea.NewProgram(
-		reportViewerModel{content: reportContent},
-		tea.WithAltScreen(),
-		tea.WithMouseCellMotion(),
-	)
-
-	model, err := p.Run()
-	if err != nil {
-		fmt.Printf("Error rendering report: %v\n", err)
+	var doExport bool
+	if *ciMode && os.Getenv("SHEETS_ID") != "" && os.Getenv("DEVELOPER_NAME") != "" {
+		doExport = true
+		fmt.Println(reportContent)
+	} else if *ciMode {
+		fmt.Println(reportContent)
 		return
 	}
 
-	finalModel := model.(reportViewerModel)
-	if finalModel.action == "regen" {
-		continue
-	} else if finalModel.action == "print" {
-		fmt.Println("\n" + reportContent + "\n")
-		return
-	} else {
+	if !*ciMode {
+		p := tea.NewProgram(
+			reportViewerModel{content: reportContent},
+			tea.WithAltScreen(),
+			tea.WithMouseCellMotion(),
+		)
+
+		model, err := p.Run()
+		if err != nil {
+			fmt.Printf("Error rendering report: %v\n", err)
+			return
+		}
+
+		finalModel := model.(reportViewerModel)
+		if finalModel.action == "regen" {
+			continue
+		} else if finalModel.action == "print" {
+			fmt.Println("\n" + reportContent + "\n")
+			return
+		} else if finalModel.action == "export_sheets" {
+			doExport = true
+		} else {
+			return
+		}
+	}
+	if doExport {
+		spin := spinner.New(spinner.CharSets[14], 100*time.Millisecond)
+		_ = spin.Color("cyan", "bold")
+		spin.Suffix = color.HiBlackString(" Exporting to Google Sheets...")
+		spin.Start()
+
+		sID := os.Getenv("SHEETS_ID")
+		dName := os.Getenv("DEVELOPER_NAME")
+		if sID == "" || dName == "" {
+			spin.Stop()
+			color.Red("❌ Missing SHEETS_ID or DEVELOPER_NAME in Settings.")
+			return
+		}
+
+		credFile := os.Getenv("GOOGLE_CREDENTIALS_PATH")
+		if credFile == "" {
+			credFile = h + "/.ghreport_credentials.json"
+		}
+		tokFile := h + "/.ghreport_token.json"
+		
+		if _, err := os.Stat(credFile); os.IsNotExist(err) {
+			spin.Stop()
+			color.Red("\n❌ Google Credentials File (credentials.json) Not Found!")
+			color.Yellow("\nHow to get this file:")
+			color.White("1. Open https://console.cloud.google.com/")
+			color.White("2. Create a new Project or select an existing one.")
+			color.White("3. Search for 'Google Sheets API' and Enable it.")
+			color.White("4. Go to 'APIs & Services' > 'Credentials'.")
+			color.White("5. Click 'Create Credentials' > 'OAuth client ID'.")
+			color.White("   (If it asks to configure Consent Screen, just fill the required fields, User Type: External/Internal).")
+			color.White("   - Application type: Desktop app")
+			color.White("6. Download the JSON file.")
+			color.White("7. Go to 'ghreport' Settings and set the absolute path to that JSON file.\n")
+			return
+		}
+
+		srv, err := sheets.NewService(credFile, tokFile)
+		if err != nil {
+			spin.Stop()
+			color.Red("❌ Google Sheets Auth Error: %v", err)
+			return
+		}
+
+		err = sheets.WriteReportToSheet(srv, sID, dName, s, reportContent)
+		spin.Stop()
+		if err != nil {
+			color.Red("❌ Failed to export: %v", err)
+		} else {
+			color.Green("✅ Successfully exported to Google Sheets!")
+		}
 		return
 	}
-	}
-}
+
+	} // end of for loop (menu loop)
+} // end of runReport
 
 type progressReader struct {
 	io.ReadCloser

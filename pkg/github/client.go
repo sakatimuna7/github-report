@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"strings"
 	"time"
+	"regexp"
+	"strconv"
 
 	"github.com/google/go-github/v62/github"
 	"golang.org/x/oauth2"
@@ -106,6 +108,32 @@ func (c *Client) GetReportData(ctx context.Context, owner, repo, branch string, 
 		}
 		
 		sb.WriteString(fmt.Sprintf("- %s (by %s)\n", shortMsg, author))
+	}
+
+	// Phase 3: Issue & PR Cross-Referencing
+	issueRegex := regexp.MustCompile(`(?i)(?:fixes|resolves|closes|refs)?\s*#(\d+)`)
+	issueSet := make(map[string]bool)
+	for _, commit := range allCommits {
+		matches := issueRegex.FindAllStringSubmatch(commit.GetCommit().GetMessage(), -1)
+		for _, m := range matches {
+			if len(m) > 1 {
+				issueSet[m[1]] = true
+			}
+		}
+	}
+
+	if len(issueSet) > 0 {
+		sb.WriteString("\n\n[Referenced Issues & PRs]\n")
+		for idStr := range issueSet {
+			id, err := strconv.Atoi(idStr)
+			if err == nil {
+				issue, _, err := c.client.Issues.Get(ctx, owner, repo, id)
+				if err == nil && issue != nil {
+					state := issue.GetState()
+					sb.WriteString(fmt.Sprintf("- #%d [%s]: %s\n", id, state, issue.GetTitle()))
+				}
+			}
+		}
 	}
 
 	return sb.String(), stats, nil
