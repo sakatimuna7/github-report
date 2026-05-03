@@ -205,15 +205,19 @@ func (c *Client) GetDashboardData(ctx context.Context, username string) (Dashboa
 	if err == nil {
 		now := time.Now()
 		for _, e := range events {
-			if e.GetType() == "PushEvent" {
-				createdAt := e.GetCreatedAt().Time
-				diff := now.Sub(createdAt).Hours() / 24
-				dayIdx := int(diff)
-				if dayIdx >= 0 && dayIdx < 30 {
+			createdAt := e.GetCreatedAt().Time
+			diff := int(now.Sub(createdAt).Hours() / 24)
+			dayIdx := 29 - diff
+			
+			if dayIdx >= 0 && dayIdx < 30 {
+				switch e.GetType() {
+				case "PushEvent":
 					payload, _ := e.ParsePayload()
 					if push, ok := payload.(*github.PushEvent); ok {
-						data.Contributions[29-dayIdx] += push.GetSize()
+						data.Contributions[dayIdx] += push.GetSize()
 					}
+				case "PullRequestEvent", "IssuesEvent", "CreateEvent":
+					data.Contributions[dayIdx]++
 				}
 			}
 		}

@@ -73,9 +73,11 @@ func RenderDashboard(data github.DashboardData) string {
 	chart := ""
 	chartHeight := 5
 	for h := chartHeight; h > 0; h-- {
-		line := color.HiBlackString("%2d ┤ ", h*(maxContrib/chartHeight))
+		labelVal := float64(maxContrib) * float64(h) / float64(chartHeight)
+		line := color.HiBlackString("%2.0f ┤ ", labelVal)
 		for _, v := range data.Contributions {
 			level := int(float64(v) / float64(maxContrib) * float64(chartHeight))
+			if v > 0 && level == 0 { level = 1 } // Ensure visibility
 			if level >= h {
 				line += lipgloss.NewStyle().Foreground(lipgloss.Color("33")).Render("┃")
 			} else {

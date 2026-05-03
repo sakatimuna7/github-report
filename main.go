@@ -12,6 +12,7 @@ import (
 	"github-report-ai/internal/ui/molecules"
 	"github-report-ai/internal/ui/pages"
 	"github-report-ai/internal/updater"
+	"github-report-ai/internal/utils"
 	"github-report-ai/pkg/github"
 
 	"github.com/charmbracelet/bubbles/list"
@@ -71,6 +72,13 @@ func main() {
 	var username string
 
 	tok := os.Getenv("GITHUB_TOKEN")
+	if tok == "" {
+		tok = os.Getenv("GH_TOKEN")
+	}
+	if tok == "" {
+		tok = utils.Sh("gh", "auth", "token")
+	}
+
 	if tok != "" {
 		c := context.Background()
 		gh := github.NewClient(tok)
