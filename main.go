@@ -942,7 +942,6 @@ skipMenuLoop:
 		return
 	}
 
-	raw := strings.Join(allRaw, "\n\n")
 	stats := totalStats
 
 	// Confirmation Step
@@ -1153,35 +1152,39 @@ skipMenuLoop:
 				return "", fmt.Errorf("fail")
 			}
 
-			dedup, _, _, _ := pipeline.DeduplicateCommits(raw)
-			chunks := pipeline.ChunkByChar(dedup, 2500)
-			pool := pipeline.NewWorkerPool(5, cc)
-			mm, rm := "gemini-flash-lite", "gemini-flash"
-			if strings.HasPrefix(*mod, "groq") {
-				mm, rm = "groq-llama", "groq-mixtral"
+			var finalReports []string
+			for i, rData := range allRaw {
+				spin.Suffix = color.HiBlackString(fmt.Sprintf(" Analyzing [%s/%s]...", batchRepos[i].Owner, batchRepos[i].Repo))
+				spin.Restart()
+
+				dedup, _, _, _ := pipeline.DeduplicateCommits(rData)
+				chunks := pipeline.ChunkByChar(dedup, 2500)
+				pool := pipeline.NewWorkerPool(5, cc)
+				mm, rm := "gemini-flash-lite", "gemini-flash"
+				if strings.HasPrefix(*mod, "groq") {
+					mm, rm = "groq-llama", "groq-mixtral"
+				}
+
+				spin.Suffix = color.HiBlackString(fmt.Sprintf(" [%d/%d] MAP Phase...", i+1, len(allRaw)))
+				mRes := pool.Run(c, chunks, func(ctx context.Context, d string) (string, error) { return fb(mm, pipeline.MapSysPrompt, d) })
+				sums, _ := pipeline.CollectSuccessful(mRes)
+				_ = cc.Flush()
+
+				spin.Suffix = color.HiBlackString(fmt.Sprintf(" [%d/%d] REDUCE Phase...", i+1, len(allRaw)))
+				merged, _ := fb(rm, pipeline.ReduceSysPrompt, strings.Join(sums, "\n---\n"))
+
+				templates, _ := pipeline.LoadTemplates()
+				tmpl, exists := templates[fr]
+				if !exists {
+					tmpl = templates["Default"]
+				}
+				
+				sp := strings.ReplaceAll(tmpl, "{{FOCUS}}", fr)
+				sp = strings.ReplaceAll(sp, "{{CONTEXT}}", ctxN)
+
+				report, _ := fb(mm, sp, merged)
+				finalReports = append(finalReports, fmt.Sprintf("## REPOSITORY: %s/%s\n\n%s", batchRepos[i].Owner, batchRepos[i].Repo, report))
 			}
-
-			spin.Suffix = color.HiBlackString(" MAP Phase (Parallel Analysis)...")
-			spin.Restart()
-			mRes := pool.Run(c, chunks, func(ctx context.Context, d string) (string, error) { return fb(mm, pipeline.MapSysPrompt, d) })
-			spin.Stop()
-			sums, _ := pipeline.CollectSuccessful(mRes)
-			_ = cc.Flush()
-
-			spin.Suffix = color.HiBlackString(" REDUCE Phase (Merging Insights)...")
-			spin.Restart()
-			merged, _ := fb(rm, pipeline.ReduceSysPrompt, strings.Join(sums, "\n---\n"))
-
-			templates, _ := pipeline.LoadTemplates()
-			tmpl, exists := templates[fr]
-			if !exists {
-				tmpl = templates["Default"]
-			}
-			
-			sp := strings.ReplaceAll(tmpl, "{{FOCUS}}", fr)
-			sp = strings.ReplaceAll(sp, "{{CONTEXT}}", ctxN)
-
-			report, _ := fb(mm, sp, merged)
 			spin.Stop()
 
 			repoNames := ""
@@ -1194,7 +1197,7 @@ skipMenuLoop:
 				headerPrefix = "# BATCH REPORT"
 			}
 			header := fmt.Sprintf("%s: %s\n\n", headerPrefix, repoNames)
-			reportContent = fmt.Sprintf("%s%s\n\nUsage: %d Prompt | %d Completion | %d Total Tokens\n", header, report, usage.PromptTokens, usage.CompletionTokens, usage.TotalTokens)
+			reportContent = fmt.Sprintf("%s%s\n\nUsage: %d Prompt | %d Completion | %d Total Tokens\n", header, strings.Join(finalReports, "\n\n---\n\n"), usage.PromptTokens, usage.CompletionTokens, usage.TotalTokens)
 			
 			// Save to cache
 			_ = pipeline.SaveReportResult(cacheFile, pipeline.ReportResult{
