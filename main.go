@@ -613,6 +613,7 @@ func runReport(confPath string) {
 	periodFlag := fs.String("period", "today", "Date period (e.g. 02/01/2006 or 'today')")
 	focusFlag := fs.String("focus", "1. Semua", "Focus area")
 	
+	var batchRepos []struct{ Owner, Repo string }
 	_ = fs.Parse(os.Args[1:])
 
 	argsPassed := *owner != "" && *repo != ""
@@ -654,11 +655,15 @@ func runReport(confPath string) {
 			
 			for _, hItem := range history {
 				val := fmt.Sprintf("%s/%s", hItem.Owner, hItem.Repo)
-				// Don't duplicate current dir in history list
 				if val != fmt.Sprintf("%s/%s", localOwner, localRepo) {
 					opts = append(opts, huh.NewOption(fmt.Sprintf("🕒 %s", val), val))
 				}
 			}
+
+			if len(history) > 1 {
+				opts = append(opts, huh.NewOption("📦 Batch Mode (Multi-Repo)", "batch"))
+			}
+
 			opts = append(opts, huh.NewOption("➕ Enter New Repository...", "new"))
 			if len(history) > 0 {
 				opts = append(opts, huh.NewOption("🗑️ Manage History (Delete Repo)", "manage"))
@@ -674,6 +679,52 @@ func runReport(confPath string) {
 
 			if err != nil || selected == "exit" {
 				return
+			}
+
+			if selected == "batch" {
+				var batchOpts []huh.Option[string]
+				// Add current dir if it exists
+				if localOwner != "" {
+					val := fmt.Sprintf("%s/%s", localOwner, localRepo)
+					batchOpts = append(batchOpts, huh.NewOption(val, val))
+				}
+				// Add history
+				for _, hItem := range history {
+					val := fmt.Sprintf("%s/%s", hItem.Owner, hItem.Repo)
+					exists := false
+					for _, o := range batchOpts {
+						if o.Value == val {
+							exists = true
+							break
+						}
+					}
+					if !exists {
+						batchOpts = append(batchOpts, huh.NewOption(val, val))
+					}
+				}
+
+				var batchSelected []string
+				err = huh.NewMultiSelect[string]().
+					Title("Select Repositories for Batch Report").
+					Description("Choose 2 or more repos to combine into one report").
+					Options(batchOpts...).
+					Value(&batchSelected).
+					Run()
+
+				if err == nil && len(batchSelected) > 0 {
+					batchRepos = nil
+					for _, b := range batchSelected {
+						p := strings.Split(b, "/")
+						if len(p) >= 2 {
+							batchRepos = append(batchRepos, struct{ Owner, Repo string }{p[0], p[1]})
+						}
+					}
+					// Use the first one as primary for some logic, but we'll loop later
+					*owner = batchRepos[0].Owner
+					*repo = batchRepos[0].Repo
+					break
+				}
+				continue menuLoop
 			}
 
 			if selected == "manage" {
@@ -723,12 +774,14 @@ func runReport(confPath string) {
 			if len(parts) >= 2 {
 				*owner = parts[len(parts)-2]
 				*repo = parts[len(parts)-1]
+				batchRepos = []struct{ Owner, Repo string }{{*owner, *repo}}
 			}
 			break
 		}
 	} else if *owner == "" || *repo == "" {
 		if *owner == "" { *owner = localOwner }
 		if *repo == "" { *repo = localRepo }
+		batchRepos = []struct{ Owner, Repo string }{{*owner, *repo}}
 	}
 skipMenuLoop:
 	
@@ -841,15 +894,26 @@ skipMenuLoop:
 		}
 
 	h, _ := os.UserHomeDir()
-	cache := h + "/.ghreport_cache"
-	_ = os.MkdirAll(cache, 0755)
-	cc := pipeline.NewFileCache(cache + "/" + fmt.Sprintf("%s_%s_%s_%s_chunks.json", *owner, *repo, *branch, s.Format("2006-01-02")))
+	cacheDir := h + "/.ghreport_cache"
+	_ = os.MkdirAll(cacheDir, 0755)
 
 	c := context.Background()
 	spin := spinner.New(spinner.CharSets[14], 100*time.Millisecond)
 	_ = spin.Color("cyan", "bold")
+
+	// Create a unique cache key for the set of repos
+	repoKey := ""
+	for _, br := range batchRepos {
+		repoKey += br.Owner + "/" + br.Repo + "+"
+	}
+	cc := pipeline.NewFileCache(cacheDir + "/" + pipeline.ContentHash(repoKey+*branch+s.Format("2006-01-02")) + "_chunks.json")
+
+	var allRaw []string
+	var totalStats github.CommitStats
+	
 	spin.Suffix = color.HiBlackString(" Fetching GitHub Data...")
 	spin.Start()
+	
 	ws, we := 9, 17
 	if s := os.Getenv("WORK_START"); s != "" {
 		fmt.Sscanf(s, "%d", &ws)
@@ -858,12 +922,28 @@ skipMenuLoop:
 		fmt.Sscanf(s, "%d", &we)
 	}
 
-	raw, stats, err := github.NewClient(*tok).GetReportData(c, *owner, *repo, *branch, *lim, s, u, ws, we)
+	for _, br := range batchRepos {
+		if len(batchRepos) > 1 {
+			spin.Suffix = color.HiBlackString(fmt.Sprintf(" Fetching [%s/%s]...", br.Owner, br.Repo))
+		}
+		raw, stats, err := github.NewClient(*tok).GetReportData(c, br.Owner, br.Repo, *branch, *lim, s, u, ws, we)
+		if err == nil {
+			allRaw = append(allRaw, fmt.Sprintf("=== REPOSITORY: %s/%s ===\n%s", br.Owner, br.Repo, raw))
+			totalStats.Total += stats.Total
+			totalStats.Features += stats.Features
+			totalStats.Fixes += stats.Fixes
+			totalStats.Overtime += stats.Overtime
+		}
+	}
 	spin.Stop()
-	if err != nil {
-		fmt.Printf(color.RedString("Error: %v\n", err))
+
+	if len(allRaw) == 0 {
+		color.Red("❌ No data fetched from any repository.")
 		return
 	}
+
+	raw := strings.Join(allRaw, "\n\n")
+	stats := totalStats
 
 	// Confirmation Step
 	columns := []table.Column{
@@ -998,7 +1078,7 @@ skipMenuLoop:
 		}
 
 		if !*ciMode {
-			err = huh.NewForm(huh.NewGroup(fields...)).Run()
+			err := huh.NewForm(huh.NewGroup(fields...)).Run()
 			if err != nil {
 				break reportLoop // User cancelled form, go back to repo/date selection
 			}
@@ -1104,7 +1184,16 @@ skipMenuLoop:
 			report, _ := fb(mm, sp, merged)
 			spin.Stop()
 
-			header := fmt.Sprintf("# REPORT: %s/%s\n\n", *owner, *repo)
+			repoNames := ""
+			for i, br := range batchRepos {
+				if i > 0 { repoNames += ", " }
+				repoNames += br.Owner + "/" + br.Repo
+			}
+			headerPrefix := "# REPORT"
+			if len(batchRepos) > 1 {
+				headerPrefix = "# BATCH REPORT"
+			}
+			header := fmt.Sprintf("%s: %s\n\n", headerPrefix, repoNames)
 			reportContent = fmt.Sprintf("%s%s\n\nUsage: %d Prompt | %d Completion | %d Total Tokens\n", header, report, usage.PromptTokens, usage.CompletionTokens, usage.TotalTokens)
 			
 			// Save to cache
