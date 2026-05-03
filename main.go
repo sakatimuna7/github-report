@@ -15,9 +15,11 @@ import (
 	"github-report-ai/internal/utils"
 	"github-report-ai/pkg/github"
 
+	"github.com/briandowns/spinner"
 	"github.com/charmbracelet/bubbles/list"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/creativeprojects/go-selfupdate"
+	"github.com/fatih/color"
 	"github.com/joho/godotenv"
 )
 
@@ -82,6 +84,12 @@ func main() {
 	if tok != "" {
 		c := context.Background()
 		gh := github.NewClient(tok)
+		
+		spin := spinner.New(spinner.CharSets[14], 100*time.Millisecond)
+		_ = spin.Color("cyan", "bold")
+		spin.Suffix = color.HiBlackString(" Loading your GitHub profile & stats...")
+		spin.Start()
+
 		username, _ = gh.GetUserLogin(c)
 		
 		if username != "" {
@@ -111,6 +119,7 @@ func main() {
 				}
 			}
 		}
+		spin.Stop()
 	}
 
 	for {

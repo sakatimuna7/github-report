@@ -7,6 +7,7 @@ import (
 	"time"
 	"regexp"
 	"strconv"
+	"sync"
 
 	"github.com/google/go-github/v62/github"
 	"golang.org/x/oauth2"
@@ -181,47 +182,68 @@ func (c *Client) GetDashboardData(ctx context.Context, username string) (Dashboa
 		Contributions: make([]int, 30),
 	}
 
-	// 1. Languages (Top 20 repos)
-	repos, _, err := c.client.Repositories.List(ctx, "", &github.RepositoryListOptions{
-		ListOptions: github.ListOptions{PerPage: 20},
-	})
-	if err == nil {
-		for _, r := range repos {
-			if r.GetOwner() == nil { continue }
-			langs, _, err := c.client.Repositories.ListLanguages(ctx, r.GetOwner().GetLogin(), r.GetName())
-			if err == nil {
-				for l, bytes := range langs {
-					data.Languages[l] += bytes
-				}
-			}
-		}
-	}
+	var wg sync.WaitGroup
+	var mu sync.Mutex
 
-	// 2. Contributions (Last 30 days via events)
-	// Note: REST API doesn't give a clean chart, we'll approximate from events or just return empty for now
-	// to avoid heavy API usage. Actual charts often use GraphQL.
-	// For this task, we'll try to fetch recent events and count commits.
-	events, _, err := c.client.Activity.ListEventsPerformedByUser(ctx, username, false, &github.ListOptions{PerPage: 100})
-	if err == nil {
-		now := time.Now()
-		for _, e := range events {
-			createdAt := e.GetCreatedAt().Time
-			diff := int(now.Sub(createdAt).Hours() / 24)
-			dayIdx := 29 - diff
-			
-			if dayIdx >= 0 && dayIdx < 30 {
-				switch e.GetType() {
-				case "PushEvent":
-					payload, _ := e.ParsePayload()
-					if push, ok := payload.(*github.PushEvent); ok {
-						data.Contributions[dayIdx] += push.GetSize()
+	// 1. Languages (Parallel fetch per repo)
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		repos, _, err := c.client.Repositories.List(ctx, "", &github.RepositoryListOptions{
+			ListOptions: github.ListOptions{PerPage: 20},
+		})
+		if err == nil {
+			var repoWg sync.WaitGroup
+			for _, r := range repos {
+				if r.GetOwner() == nil { continue }
+				repoWg.Add(1)
+				go func(owner, name string) {
+					defer repoWg.Done()
+					langs, _, err := c.client.Repositories.ListLanguages(ctx, owner, name)
+					if err == nil {
+						mu.Lock()
+						for l, bytes := range langs {
+							data.Languages[l] += bytes
+						}
+						mu.Unlock()
 					}
-				case "PullRequestEvent", "IssuesEvent", "CreateEvent":
-					data.Contributions[dayIdx]++
+				}(r.GetOwner().GetLogin(), r.GetName())
+			}
+			repoWg.Wait()
+		}
+	}()
+
+	// 2. Contributions
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		events, _, err := c.client.Activity.ListEventsPerformedByUser(ctx, username, false, &github.ListOptions{PerPage: 100})
+		if err == nil {
+			now := time.Now()
+			for _, e := range events {
+				createdAt := e.GetCreatedAt().Time
+				diff := int(now.Sub(createdAt).Hours() / 24)
+				dayIdx := 29 - diff
+				
+				if dayIdx >= 0 && dayIdx < 30 {
+					switch e.GetType() {
+					case "PushEvent":
+						payload, _ := e.ParsePayload()
+						if push, ok := payload.(*github.PushEvent); ok {
+							mu.Lock()
+							data.Contributions[dayIdx] += push.GetSize()
+							mu.Unlock()
+						}
+					case "PullRequestEvent", "IssuesEvent", "CreateEvent":
+						mu.Lock()
+						data.Contributions[dayIdx]++
+						mu.Unlock()
+					}
 				}
 			}
 		}
-	}
+	}()
 
+	wg.Wait()
 	return data, nil
 }

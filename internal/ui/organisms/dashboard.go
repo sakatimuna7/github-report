@@ -43,19 +43,21 @@ func RenderDashboard(data github.DashboardData) string {
 	colors := []string{"#3178c6", "#f1e05a", "#e34c26", "#563d7c", "#b07219", "#41b883", "#00b4ab", "#89e051"}
 	
 	legend := ""
-	for i, l := range langs {
-		pct := float64(l.Bytes) / float64(totalBytes)
-		w := int(pct * float64(barWidth))
-		if w < 1 && pct > 0 { w = 1 }
-		
-		c := colors[i%len(colors)]
-		char := "█"
-		
-		bar += lipgloss.NewStyle().Foreground(lipgloss.Color(c)).Render(strings.Repeat(char, w))
-		
-		dot := lipgloss.NewStyle().Foreground(lipgloss.Color(c)).Render("●")
-		legend += fmt.Sprintf("%s %s %s   ", dot, l.Name, color.HiBlackString("%.1f%%", pct*100))
-		if (i+1)%4 == 0 { legend += "\n" }
+	if totalBytes > 0 {
+		for i, l := range langs {
+			pct := float64(l.Bytes) / float64(totalBytes)
+			w := int(pct * float64(barWidth))
+			if w < 1 && pct > 0 { w = 1 }
+			
+			c := colors[i%len(colors)]
+			char := "█"
+			
+			bar += lipgloss.NewStyle().Foreground(lipgloss.Color(c)).Render(strings.Repeat(char, w))
+			
+			dot := lipgloss.NewStyle().Foreground(lipgloss.Color(c)).Render("●")
+			legend += fmt.Sprintf("%s %s %s   ", dot, l.Name, color.HiBlackString("%.1f%%", pct*100))
+			if (i+1)%4 == 0 { legend += "\n" }
+		}
 	}
 
 	stackView := lipgloss.JoinVertical(lipgloss.Left,
