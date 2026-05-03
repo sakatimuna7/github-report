@@ -27,7 +27,23 @@ func LoadTemplates() (map[string]string, error) {
 	dir := filepath.Join(home, ".ghreport_templates")
 	if _, err := os.Stat(dir); os.IsNotExist(err) {
 		_ = os.MkdirAll(dir, 0755)
-		_ = os.WriteFile(filepath.Join(dir, "Default.txt"), []byte(defaultTemplate), 0644)
+		
+		defaults := map[string]string{
+			"Summary":   "Gambaran umum tentang progress yang dikerjakan.",
+			"Changes":   "Fokus pada perubahan utama dan fitur baru yang diimplementasikan.",
+			"Risk":      "Deteksi masalah, bug, atau risiko teknis dari commit data.",
+			"Recommend": "Saran teknis atau improvement untuk kedepannya.",
+			"Changelog": "Human-readable release notes untuk stakeholder.",
+			"Default":   defaultTemplate,
+		}
+
+		for name, desc := range defaults {
+			content := defaultTemplate
+			if name != "Default" {
+				content = strings.ReplaceAll(defaultTemplate, "Focus: {{FOCUS}}", "Focus: "+desc)
+			}
+			_ = os.WriteFile(filepath.Join(dir, name+".txt"), []byte(content), 0644)
+		}
 	}
 
 	entries, err := os.ReadDir(dir)

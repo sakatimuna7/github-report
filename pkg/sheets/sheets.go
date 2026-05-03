@@ -11,23 +11,28 @@ import (
 var indonesianMonths = []string{"Januari", "Februari", "Maret", "April", "Mei", "Juni", "Juli", "Agustus", "September", "Oktober", "November", "Desember"}
 var indonesianDays = []string{"Minggu", "Senin", "Selasa", "Rabu", "Kamis", "Jumat", "Sabtu"}
 
+var indonesianMonthsCaps = []string{"JANUARI", "FEBRUARI", "MARET", "APRIL", "MEI", "JUNI", "JULI", "AGUSTUS", "SEPTEMBER", "OKTOBER", "NOVEMBER", "DESEMBER"}
+
 func getFormattedDate(t time.Time) string {
 	dayName := indonesianDays[t.Weekday()]
 	monthName := indonesianMonths[t.Month()-1]
 	return fmt.Sprintf("%s, %d %s %d", dayName, t.Day(), monthName, t.Year())
 }
 
-func getSheetName(t time.Time) string {
-	return fmt.Sprintf("%s %d", indonesianMonths[t.Month()-1], t.Year())
+func getSheetName(divisi string, t time.Time) string {
+	if divisi == "" {
+		divisi = "FRONTEND" // default
+	}
+	return fmt.Sprintf("%s-%s", strings.ToUpper(divisi), indonesianMonthsCaps[t.Month()-1])
 }
 
-func WriteReportToSheet(srv *sheets.Service, spreadsheetId string, developerName string, reportDate time.Time, reportContent string) error {
-	sheetName := getSheetName(reportDate)
+func WriteReportToSheet(srv *sheets.Service, spreadsheetId string, divisi string, developerName string, reportDate time.Time, reportContent string) error {
+	sheetName := getSheetName(divisi, reportDate)
 	targetDateStr := getFormattedDate(reportDate)
 	developerName = strings.ToUpper(strings.TrimSpace(developerName))
 
 	// Get the values from columns B and C (TANGGAL and NAMA)
-	readRange := fmt.Sprintf("%s!B:C", sheetName)
+	readRange := fmt.Sprintf("'%s'!B:C", sheetName)
 	resp, err := srv.Spreadsheets.Values.Get(spreadsheetId, readRange).Do()
 	if err != nil {
 		return fmt.Errorf("unable to retrieve data from sheet %s: %v", sheetName, err)
@@ -67,7 +72,7 @@ func WriteReportToSheet(srv *sheets.Service, spreadsheetId string, developerName
 	}
 
 	// Column D is PROGRESS TERKINI
-	writeRange := fmt.Sprintf("%s!D%d", sheetName, targetRow)
+	writeRange := fmt.Sprintf("'%s'!D%d", sheetName, targetRow)
 	var vr sheets.ValueRange
 	vr.Values = append(vr.Values, []interface{}{reportContent})
 

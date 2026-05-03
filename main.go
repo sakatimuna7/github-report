@@ -334,12 +334,15 @@ func runSettings(path string) {
 
 		sID := os.Getenv("SHEETS_ID")
 		dName := os.Getenv("DEVELOPER_NAME")
+		divisi := os.Getenv("DIVISI")
 		credPath := os.Getenv("GOOGLE_CREDENTIALS_PATH")
 
 		sIdStr := color.RedString("Not Set")
 		if sID != "" { sIdStr = color.GreenString("Set") }
 		dNameStr := color.RedString("Not Set")
 		if dName != "" { dNameStr = color.GreenString("Set") }
+		divisiStr := color.RedString("Not Set")
+		if divisi != "" { divisiStr = color.GreenString("Set") }
 		credPathStr := color.RedString("Not Set")
 		if credPath != "" { credPathStr = color.GreenString("Set") }
 
@@ -349,8 +352,10 @@ func runSettings(path string) {
 			menuItem{title: "🕒 Work Start", desc: "Currently: " + ws + ":00", action: "WorkStart"},
 			menuItem{title: "🕔 Work End", desc: "Currently: " + we + ":00", action: "WorkEnd"},
 			menuItem{title: "📊 Sheets ID", desc: "Status: " + sIdStr, action: "SheetsID"},
+			menuItem{title: "🏢 Divisi", desc: "Status: " + divisiStr, action: "Divisi"},
 			menuItem{title: "👨‍💻 Dev Name", desc: "Status: " + dNameStr, action: "DevName"},
 			menuItem{title: "🔑 Google Creds", desc: "Status: " + credPathStr, action: "CredPath"},
+			menuItem{title: "🚀 Manage Templates", desc: "Add/Delete Focus Templates", action: "Templates"},
 			menuItem{title: "⬅️  Back", desc: "Return to Main Menu", action: "Back"},
 		}
 
@@ -397,6 +402,19 @@ func runSettings(path string) {
 			if res != "" {
 				os.Setenv("SHEETS_ID", res)
 			}
+		} else if finalModel.choice == "Divisi" {
+			huh.NewSelect[string]().
+				Title("Pilih Divisi").
+				Options(
+					huh.NewOption("BACKEND", "BACKEND"),
+					huh.NewOption("FRONTEND", "FRONTEND"),
+					huh.NewOption("MOBILE", "MOBILE"),
+				).
+				Value(&res).
+				Run()
+			if res != "" {
+				os.Setenv("DIVISI", res)
+			}
 		} else if finalModel.choice == "DevName" {
 			huh.NewInput().Title("Enter Your Developer Name").Value(&res).Run()
 			if res != "" {
@@ -407,12 +425,14 @@ func runSettings(path string) {
 			if res != "" {
 				os.Setenv("GOOGLE_CREDENTIALS_PATH", res)
 			}
+		} else if finalModel.choice == "Templates" {
+			runTemplateManager()
 		}
 
-		content := fmt.Sprintf("GROQ_API_KEY=%s\nGEMINI_API_KEY=%s\nWORK_START=%s\nWORK_END=%s\nSHEETS_ID=%s\nDEVELOPER_NAME=%s\nGOOGLE_CREDENTIALS_PATH=%s\n", 
+		content := fmt.Sprintf("GROQ_API_KEY=%s\nGEMINI_API_KEY=%s\nWORK_START=%s\nWORK_END=%s\nSHEETS_ID=%s\nDIVISI=%s\nDEVELOPER_NAME=%s\nGOOGLE_CREDENTIALS_PATH=%s\n", 
 			os.Getenv("GROQ_API_KEY"), os.Getenv("GEMINI_API_KEY"), 
 			os.Getenv("WORK_START"), os.Getenv("WORK_END"),
-			os.Getenv("SHEETS_ID"), os.Getenv("DEVELOPER_NAME"),
+			os.Getenv("SHEETS_ID"), os.Getenv("DIVISI"), os.Getenv("DEVELOPER_NAME"),
 			os.Getenv("GOOGLE_CREDENTIALS_PATH"))
 		
 		h, _ := os.UserHomeDir()
@@ -938,259 +958,285 @@ skipMenuLoop:
 	}
 
 	var action string
-	var fields []huh.Field
-	
-	fields = append(fields, 
-		huh.NewNote().
-			Title("Review Selections").
-			Description(selectionSummary),
-		huh.NewNote().
-			Title("Commit Statistics").
-			Description(summary),
-	)
-
-	if hasCache {
-		fields = append(fields,
+	reportLoop:
+	for {
+		action = ""
+		var fields []huh.Field
+		
+		fields = append(fields, 
 			huh.NewNote().
-				Title("✨ Cached Report Found").
-				Description(cacheNote),
-			huh.NewSelect[string]().
-				Title("What would you like to do?").
-				Options(
-					huh.NewOption("Use Cached Report", "cache"),
-					huh.NewOption("Regenerate (New AI Call)", "regen_ai"),
-					huh.NewOption("Go Back / Cancel", "back"),
-				).
-				Value(&action),
+				Title("Review Selections").
+				Description(selectionSummary),
+			huh.NewNote().
+				Title("Commit Statistics").
+				Description(summary),
 		)
-	} else if !*ciMode {
-		var proceed bool
-		fields = append(fields,
-			huh.NewConfirm().
-				Title("Proceed to generate AI report?").
-				Affirmative("Yes, execute").
-				Negative("No, go back").
-				Value(&proceed),
-		)
-	}
 
-	if !*ciMode {
-		err = huh.NewForm(huh.NewGroup(fields...)).Run()
-		if err != nil {
-			continue // User cancelled form
-		}
-		
-		if !hasCache {
-			// Without cache, the last field is the confirm
-			// We can't cleanly extract it, but if they didn't cancel, we assume proceed=true
-			// Wait, the confirm sets the 'proceed' variable pointer
-			// However 'proceed' is scoped to the 'else if' block!
-			// Ah, that was it!
-		}
-	}
-
-	// Determine action
-	if *ciMode {
 		if hasCache {
-			action = "cache"
-		} else {
-			action = "regen_ai"
+			fields = append(fields,
+				huh.NewNote().
+					Title("✨ Cached Report Found").
+					Description(cacheNote),
+				huh.NewSelect[string]().
+					Title("What would you like to do?").
+					Options(
+						huh.NewOption("Use Cached Report", "cache"),
+						huh.NewOption("Regenerate (New AI Call)", "regen_ai"),
+						huh.NewOption("Go Back / Cancel", "back"),
+					).
+					Value(&action),
+			)
+		} else if !*ciMode {
+			var proceed bool
+			fields = append(fields,
+				huh.NewConfirm().
+					Title("Proceed to generate AI report?").
+					Affirmative("Yes, execute").
+					Negative("No, go back").
+					Value(&proceed),
+			)
 		}
-	} else if !hasCache {
-		action = "regen_ai" // Implicitly true if they didn't hit escape on the form
-	}
 
-	if action == "back" || action == "" {
-		continue // Go back to parameter selection
-	}
+		if !*ciMode {
+			err = huh.NewForm(huh.NewGroup(fields...)).Run()
+			if err != nil {
+				break reportLoop // User cancelled form, go back to repo/date selection
+			}
+		}
 
-	var reportContent string
-	var usage ai.Usage
-	
-	if action == "cache" {
-		reportContent = cachedResult.Content
-		fmt.Println(color.GreenString("\n✅ Using cached report from %s", cachedResult.Timestamp.Format("2006-01-02 15:04")))
-	} else {
-		fmt.Println()
-		color.Cyan("╭────────────────────────────────────────╮")
-		color.Cyan("│ 🚀 GENERATING REPORT                   │")
-		color.Cyan("╰────────────────────────────────────────╯")
+		// Determine action
+		if *ciMode {
+			if hasCache {
+				action = "cache"
+			} else {
+				action = "regen_ai"
+			}
+		} else if !hasCache {
+			action = "regen_ai" 
+		}
+
+		if action == "back" || action == "" {
+			break reportLoop // Go back to parameter selection
+		}
+
+		var reportContent string
+		var usage ai.Usage
 		
-		var mu sync.Mutex
-		call := func(m, sp, d string) (string, error) {
-			var res string
-			var use ai.Usage
-			var err error
-			if strings.HasPrefix(m, "gemini") {
-			id := "gemini-2.0-flash"
-			if m != "gemini-flash" {
-				id = "gemini-2.0-flash-lite-preview-02-05"
-			}
-			res, use, err = ai.NewGeminiClient(*gm).GenerateReport(c, id, sp, d)
+		if action == "cache" {
+			reportContent = cachedResult.Content
+			fmt.Println(color.GreenString("\n✅ Using cached report from %s", cachedResult.Timestamp.Format("2006-01-02 15:04")))
 		} else {
-			id := "llama-3.1-8b-instant"
-			if m == "groq-mixtral" {
-				id = "mixtral-8x7b-32768"
-			} else if m == "groq-gpt" {
-				id = "openai/gpt-oss-20b"
+			fmt.Println()
+			color.Cyan("╭────────────────────────────────────────╮")
+			color.Cyan("│ 🚀 GENERATING REPORT                   │")
+			color.Cyan("╰────────────────────────────────────────╯")
+			
+			var mu sync.Mutex
+			call := func(m, sp, d string) (string, error) {
+				var res string
+				var use ai.Usage
+				var err error
+				if strings.HasPrefix(m, "gemini") {
+					id := "gemini-2.0-flash"
+					if m != "gemini-flash" {
+						id = "gemini-2.0-flash-lite-preview-02-05"
+					}
+					res, use, err = ai.NewGeminiClient(*gm).GenerateReport(c, id, sp, d)
+				} else {
+					id := "llama-3.1-8b-instant"
+					if m == "groq-mixtral" {
+						id = "mixtral-8x7b-32768"
+					} else if m == "groq-gpt" {
+						id = "openai/gpt-oss-20b"
+					}
+					res, use, err = ai.NewGroqClient(*gk).GenerateReport(c, id, sp, d)
+				}
+				mu.Lock()
+				usage.PromptTokens += use.PromptTokens
+				usage.CompletionTokens += use.CompletionTokens
+				usage.TotalTokens += use.TotalTokens
+				mu.Unlock()
+				return res, err
 			}
-			res, use, err = ai.NewGroqClient(*gk).GenerateReport(c, id, sp, d)
-		}
-		mu.Lock()
-		usage.PromptTokens += use.PromptTokens
-		usage.CompletionTokens += use.CompletionTokens
-		usage.TotalTokens += use.TotalTokens
-		mu.Unlock()
-		return res, err
-	}
 
-	fb := func(pref, sp, d string) (string, error) {
-		if res, err := call(pref, sp, d); err == nil {
-			return res, nil
-		}
-		for _, m := range []string{"gemini-flash", "gemini-flash-lite", "groq-llama"} {
-			if m != pref {
-				if res, err := call(m, sp, d); err == nil {
+			fb := func(pref, sp, d string) (string, error) {
+				if res, err := call(pref, sp, d); err == nil {
 					return res, nil
 				}
+				for _, m := range []string{"gemini-flash", "gemini-flash-lite", "groq-llama"} {
+					if m != pref {
+						if res, err := call(m, sp, d); err == nil {
+							return res, nil
+						}
+					}
+				}
+				return "", fmt.Errorf("fail")
+			}
+
+			dedup, _, _, _ := pipeline.DeduplicateCommits(raw)
+			chunks := pipeline.ChunkByChar(dedup, 2500)
+			pool := pipeline.NewWorkerPool(5, cc)
+			mm, rm := "gemini-flash-lite", "gemini-flash"
+			if strings.HasPrefix(*mod, "groq") {
+				mm, rm = "groq-llama", "groq-mixtral"
+			}
+
+			spin.Suffix = color.HiBlackString(" MAP Phase (Parallel Analysis)...")
+			spin.Restart()
+			mRes := pool.Run(c, chunks, func(ctx context.Context, d string) (string, error) { return fb(mm, pipeline.MapSysPrompt, d) })
+			spin.Stop()
+			sums, _ := pipeline.CollectSuccessful(mRes)
+			_ = cc.Flush()
+
+			spin.Suffix = color.HiBlackString(" REDUCE Phase (Merging Insights)...")
+			spin.Restart()
+			merged, _ := fb(rm, pipeline.ReduceSysPrompt, strings.Join(sums, "\n---\n"))
+
+			templates, _ := pipeline.LoadTemplates()
+			tmpl, exists := templates[fr]
+			if !exists {
+				tmpl = templates["Default"]
+			}
+			
+			sp := strings.ReplaceAll(tmpl, "{{FOCUS}}", fr)
+			sp = strings.ReplaceAll(sp, "{{CONTEXT}}", ctxN)
+
+			report, _ := fb(mm, sp, merged)
+			spin.Stop()
+
+			reportContent = fmt.Sprintf("%s\n\nUsage: %d Prompt | %d Completion | %d Total Tokens\n", report, usage.PromptTokens, usage.CompletionTokens, usage.TotalTokens)
+			
+			// Save to cache
+			_ = pipeline.SaveReportResult(cacheFile, pipeline.ReportResult{
+				Content:      reportContent,
+				Timestamp:    time.Now(),
+				Model:        *mod,
+				Period:       dr,
+				Focus:        fr,
+				TotalCommits: stats.Total,
+				Features:     stats.Features,
+				Fixes:        stats.Fixes,
+				Overtime:     stats.Overtime,
+				Usage:        fmt.Sprintf("%d Prompt | %d Completion | %d Total Tokens", usage.PromptTokens, usage.CompletionTokens, usage.TotalTokens),
+			})
+			
+			// Update local cache state so if we return to the selection screen, it knows it has cache
+			hasCache = true
+			cachedResult = pipeline.ReportResult{
+				Content:      reportContent,
+				Timestamp:    time.Now(),
+				Model:        *mod,
+				Period:       dr,
+				Focus:        fr,
+				TotalCommits: stats.Total,
+				Features:     stats.Features,
+				Fixes:        stats.Fixes,
+				Overtime:     stats.Overtime,
+			}
+			cacheNote = fmt.Sprintf("Generated at: %s\nModel used: %s\nFocus: %s\nStats: %d commits, %d feats, %d fixes", 
+				cachedResult.Timestamp.Format("2006-01-02 15:04"),
+				cachedResult.Model,
+				cachedResult.Focus,
+				cachedResult.TotalCommits, cachedResult.Features, cachedResult.Fixes,
+			)
+		}
+
+		var doExport bool
+		if *ciMode && os.Getenv("SHEETS_ID") != "" && os.Getenv("DEVELOPER_NAME") != "" {
+			doExport = true
+			fmt.Println(reportContent)
+		} else if *ciMode {
+			fmt.Println(reportContent)
+			return
+		}
+
+		if !*ciMode {
+			p := tea.NewProgram(
+				reportViewerModel{content: reportContent},
+				tea.WithAltScreen(),
+				tea.WithMouseCellMotion(),
+			)
+
+			model, err := p.Run()
+			if err != nil {
+				fmt.Printf("Error rendering report: %v\n", err)
+				return
+			}
+
+			finalModel := model.(reportViewerModel)
+			if finalModel.action == "regen" {
+				hasCache = false // Force regeneration in next iteration
+				continue reportLoop
+			} else if finalModel.action == "print" {
+				fmt.Println("\n" + reportContent + "\n")
+				// User wants to stay in the menu
+				continue reportLoop
+			} else if finalModel.action == "export_sheets" {
+				doExport = true
+			} else {
+				break reportLoop // Exit back to repository selection
 			}
 		}
-		return "", fmt.Errorf("fail")
-	}
+		if doExport {
+			spin := spinner.New(spinner.CharSets[14], 100*time.Millisecond)
+			_ = spin.Color("cyan", "bold")
+			spin.Suffix = color.HiBlackString(" Exporting to Google Sheets...")
+			spin.Start()
 
-	dedup, _, _, _ := pipeline.DeduplicateCommits(raw)
-	chunks := pipeline.ChunkByChar(dedup, 2500)
-	pool := pipeline.NewWorkerPool(5, cc)
-	mm, rm := "gemini-flash-lite", "gemini-flash"
-	if strings.HasPrefix(*mod, "groq") {
-		mm, rm = "groq-llama", "groq-mixtral"
-	}
+			sID := os.Getenv("SHEETS_ID")
+			dName := os.Getenv("DEVELOPER_NAME")
+			if sID == "" || dName == "" {
+				spin.Stop()
+				color.Red("❌ Missing SHEETS_ID or DEVELOPER_NAME in Settings.")
+				continue reportLoop
+			}
 
-	spin.Suffix = color.HiBlackString(" MAP Phase (Parallel Analysis)...")
-	spin.Restart()
-	mRes := pool.Run(c, chunks, func(ctx context.Context, d string) (string, error) { return fb(mm, pipeline.MapSysPrompt, d) })
-	spin.Stop()
-	sums, _ := pipeline.CollectSuccessful(mRes)
-	_ = cc.Flush()
+			credFile := os.Getenv("GOOGLE_CREDENTIALS_PATH")
+			if credFile == "" {
+				credFile = h + "/.ghreport_credentials.json"
+			}
+			tokFile := h + "/.ghreport_token.json"
+			
+			if _, err := os.Stat(credFile); os.IsNotExist(err) {
+				spin.Stop()
+				color.Red("\n❌ Google Credentials File (credentials.json) Not Found!")
+				color.Yellow("\nHow to get this file:")
+				color.White("1. Open https://console.cloud.google.com/")
+				color.White("2. Create a new Project or select an existing one.")
+				color.White("3. Search for 'Google Sheets API' and Enable it.")
+				color.White("4. Go to 'APIs & Services' > 'Credentials'.")
+				color.White("5. Click 'Create Credentials' > 'OAuth client ID'.")
+				color.White("   (If it asks to configure Consent Screen, just fill the required fields, User Type: External/Internal).")
+				color.White("   - Application type: Desktop app")
+				color.White("6. Download the JSON file.")
+				color.White("7. Go to 'ghreport' Settings and set the absolute path to that JSON file.\n")
+				continue reportLoop
+			}
 
-	spin.Suffix = color.HiBlackString(" REDUCE Phase (Merging Insights)...")
-	spin.Restart()
-	merged, _ := fb(rm, pipeline.ReduceSysPrompt, strings.Join(sums, "\n---\n"))
+			srv, err := sheets.NewService(credFile, tokFile)
+			if err != nil {
+				spin.Stop()
+				color.Red("❌ Google Sheets Auth Error: %v", err)
+				continue reportLoop
+			}
 
-	templates, _ := pipeline.LoadTemplates()
-	tmpl, exists := templates[fr]
-	if !exists {
-		tmpl = templates["Default"]
-	}
-	
-	sp := strings.ReplaceAll(tmpl, "{{FOCUS}}", fr)
-	sp = strings.ReplaceAll(sp, "{{CONTEXT}}", ctxN)
+			divisi := os.Getenv("DIVISI")
+			
+			// Strip token usage info before exporting
+			cleanContent := reportContent
+			if idx := strings.Index(cleanContent, "\n\nUsage:"); idx != -1 {
+				cleanContent = cleanContent[:idx]
+			}
 
-	report, _ := fb(mm, sp, merged)
-	spin.Stop()
-
-	reportContent = fmt.Sprintf("%s\n\nUsage: %d Prompt | %d Completion | %d Total Tokens\n", report, usage.PromptTokens, usage.CompletionTokens, usage.TotalTokens)
-	
-	// Save to cache
-	_ = pipeline.SaveReportResult(cacheFile, pipeline.ReportResult{
-		Content:      reportContent,
-		Timestamp:    time.Now(),
-		Model:        *mod,
-		Period:       dr,
-		Focus:        fr,
-		TotalCommits: stats.Total,
-		Features:     stats.Features,
-		Fixes:        stats.Fixes,
-		Overtime:     stats.Overtime,
-		Usage:        fmt.Sprintf("%d Prompt | %d Completion | %d Total Tokens", usage.PromptTokens, usage.CompletionTokens, usage.TotalTokens),
-	})
-	} // end of else block for action != "cache"
-
-	var doExport bool
-	if *ciMode && os.Getenv("SHEETS_ID") != "" && os.Getenv("DEVELOPER_NAME") != "" {
-		doExport = true
-		fmt.Println(reportContent)
-	} else if *ciMode {
-		fmt.Println(reportContent)
-		return
-	}
-
-	if !*ciMode {
-		p := tea.NewProgram(
-			reportViewerModel{content: reportContent},
-			tea.WithAltScreen(),
-			tea.WithMouseCellMotion(),
-		)
-
-		model, err := p.Run()
-		if err != nil {
-			fmt.Printf("Error rendering report: %v\n", err)
-			return
-		}
-
-		finalModel := model.(reportViewerModel)
-		if finalModel.action == "regen" {
-			continue
-		} else if finalModel.action == "print" {
-			fmt.Println("\n" + reportContent + "\n")
-			return
-		} else if finalModel.action == "export_sheets" {
-			doExport = true
-		} else {
-			return
-		}
-	}
-	if doExport {
-		spin := spinner.New(spinner.CharSets[14], 100*time.Millisecond)
-		_ = spin.Color("cyan", "bold")
-		spin.Suffix = color.HiBlackString(" Exporting to Google Sheets...")
-		spin.Start()
-
-		sID := os.Getenv("SHEETS_ID")
-		dName := os.Getenv("DEVELOPER_NAME")
-		if sID == "" || dName == "" {
+			err = sheets.WriteReportToSheet(srv, sID, divisi, dName, s, cleanContent)
 			spin.Stop()
-			color.Red("❌ Missing SHEETS_ID or DEVELOPER_NAME in Settings.")
-			return
+			if err != nil {
+				color.Red("❌ Failed to export: %v", err)
+			} else {
+				color.Green("✅ Successfully exported to Google Sheets!")
+			}
+			continue reportLoop
 		}
-
-		credFile := os.Getenv("GOOGLE_CREDENTIALS_PATH")
-		if credFile == "" {
-			credFile = h + "/.ghreport_credentials.json"
-		}
-		tokFile := h + "/.ghreport_token.json"
-		
-		if _, err := os.Stat(credFile); os.IsNotExist(err) {
-			spin.Stop()
-			color.Red("\n❌ Google Credentials File (credentials.json) Not Found!")
-			color.Yellow("\nHow to get this file:")
-			color.White("1. Open https://console.cloud.google.com/")
-			color.White("2. Create a new Project or select an existing one.")
-			color.White("3. Search for 'Google Sheets API' and Enable it.")
-			color.White("4. Go to 'APIs & Services' > 'Credentials'.")
-			color.White("5. Click 'Create Credentials' > 'OAuth client ID'.")
-			color.White("   (If it asks to configure Consent Screen, just fill the required fields, User Type: External/Internal).")
-			color.White("   - Application type: Desktop app")
-			color.White("6. Download the JSON file.")
-			color.White("7. Go to 'ghreport' Settings and set the absolute path to that JSON file.\n")
-			return
-		}
-
-		srv, err := sheets.NewService(credFile, tokFile)
-		if err != nil {
-			spin.Stop()
-			color.Red("❌ Google Sheets Auth Error: %v", err)
-			return
-		}
-
-		err = sheets.WriteReportToSheet(srv, sID, dName, s, reportContent)
-		spin.Stop()
-		if err != nil {
-			color.Red("❌ Failed to export: %v", err)
-		} else {
-			color.Green("✅ Successfully exported to Google Sheets!")
-		}
-		return
 	}
 
 	} // end of for loop (menu loop)
