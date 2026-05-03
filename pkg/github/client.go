@@ -162,3 +162,62 @@ func (c *Client) GetReportData(ctx context.Context, owner, repo, branch string, 
 
 	return sb.String(), stats, nil
 }
+func (c *Client) GetUserLogin(ctx context.Context) (string, error) {
+	u, _, err := c.client.Users.Get(ctx, "")
+	if err != nil {
+		return "", err
+	}
+	return u.GetLogin(), nil
+}
+
+type DashboardData struct {
+	Languages     map[string]int
+	Contributions []int // Last 30 days
+}
+
+func (c *Client) GetDashboardData(ctx context.Context, username string) (DashboardData, error) {
+	data := DashboardData{
+		Languages:     make(map[string]int),
+		Contributions: make([]int, 30),
+	}
+
+	// 1. Languages (Top 20 repos for performance)
+	repos, _, err := c.client.Repositories.List(ctx, "", &github.RepositoryListOptions{
+		Sort:        "updated",
+		ListOptions: github.ListOptions{PerPage: 20},
+	})
+	if err == nil {
+		for _, r := range repos {
+			langs, _, err := c.client.Repositories.ListLanguages(ctx, r.GetOwner().GetLogin(), r.GetName())
+			if err == nil {
+				for l, bytes := range langs {
+					data.Languages[l] += bytes
+				}
+			}
+		}
+	}
+
+	// 2. Contributions (Last 30 days via events)
+	// Note: REST API doesn't give a clean chart, we'll approximate from events or just return empty for now
+	// to avoid heavy API usage. Actual charts often use GraphQL.
+	// For this task, we'll try to fetch recent events and count commits.
+	events, _, err := c.client.Activity.ListEventsPerformedByUser(ctx, username, false, &github.ListOptions{PerPage: 100})
+	if err == nil {
+		now := time.Now()
+		for _, e := range events {
+			if e.GetType() == "PushEvent" {
+				createdAt := e.GetCreatedAt().Time
+				diff := now.Sub(createdAt).Hours() / 24
+				dayIdx := int(diff)
+				if dayIdx >= 0 && dayIdx < 30 {
+					payload, _ := e.ParsePayload()
+					if push, ok := payload.(*github.PushEvent); ok {
+						data.Contributions[29-dayIdx] += push.GetSize()
+					}
+				}
+			}
+		}
+	}
+
+	return data, nil
+}
