@@ -1152,39 +1152,47 @@ skipMenuLoop:
 				return "", fmt.Errorf("fail")
 			}
 
-			var finalReports []string
-			for i, rData := range allRaw {
-				spin.Suffix = color.HiBlackString(fmt.Sprintf(" Analyzing [%s/%s]...", batchRepos[i].Owner, batchRepos[i].Repo))
-				spin.Restart()
+			finalReports := make([]string, len(allRaw))
+			var wg sync.WaitGroup
+			
+			spin.Suffix = color.HiBlackString(fmt.Sprintf(" Analyzing %d repositories in parallel...", len(allRaw)))
+			spin.Restart()
 
-				dedup, _, _, _ := pipeline.DeduplicateCommits(rData)
-				chunks := pipeline.ChunkByChar(dedup, 2500)
-				pool := pipeline.NewWorkerPool(5, cc)
-				mm, rm := "gemini-flash-lite", "gemini-flash"
-				if strings.HasPrefix(*mod, "groq") {
-					mm, rm = "groq-llama", "groq-mixtral"
-				}
+			for i := range allRaw {
+				wg.Add(1)
+				go func(idx int) {
+					defer wg.Done()
+					rData := allRaw[idx]
+					br := batchRepos[idx]
 
-				spin.Suffix = color.HiBlackString(fmt.Sprintf(" [%d/%d] MAP Phase...", i+1, len(allRaw)))
-				mRes := pool.Run(c, chunks, func(ctx context.Context, d string) (string, error) { return fb(mm, pipeline.MapSysPrompt, d) })
-				sums, _ := pipeline.CollectSuccessful(mRes)
-				_ = cc.Flush()
+					dedup, _, _, _ := pipeline.DeduplicateCommits(rData)
+					chunks := pipeline.ChunkByChar(dedup, 2500)
+					pool := pipeline.NewWorkerPool(5, cc)
+					mm, rm := "gemini-flash-lite", "gemini-flash"
+					if strings.HasPrefix(*mod, "groq") {
+						mm, rm = "groq-llama", "groq-mixtral"
+					}
 
-				spin.Suffix = color.HiBlackString(fmt.Sprintf(" [%d/%d] REDUCE Phase...", i+1, len(allRaw)))
-				merged, _ := fb(rm, pipeline.ReduceSysPrompt, strings.Join(sums, "\n---\n"))
+					mRes := pool.Run(c, chunks, func(ctx context.Context, d string) (string, error) { return fb(mm, pipeline.MapSysPrompt, d) })
+					sums, _ := pipeline.CollectSuccessful(mRes)
+					
+					merged, _ := fb(rm, pipeline.ReduceSysPrompt, strings.Join(sums, "\n---\n"))
 
-				templates, _ := pipeline.LoadTemplates()
-				tmpl, exists := templates[fr]
-				if !exists {
-					tmpl = templates["Default"]
-				}
-				
-				sp := strings.ReplaceAll(tmpl, "{{FOCUS}}", fr)
-				sp = strings.ReplaceAll(sp, "{{CONTEXT}}", ctxN)
+					templates, _ := pipeline.LoadTemplates()
+					tmpl, exists := templates[fr]
+					if !exists {
+						tmpl = templates["Default"]
+					}
+					
+					sp := strings.ReplaceAll(tmpl, "{{FOCUS}}", fr)
+					sp = strings.ReplaceAll(sp, "{{CONTEXT}}", ctxN)
 
-				report, _ := fb(mm, sp, merged)
-				finalReports = append(finalReports, fmt.Sprintf("## REPOSITORY: %s/%s\n\n%s", batchRepos[i].Owner, batchRepos[i].Repo, report))
+					report, _ := fb(mm, sp, merged)
+					finalReports[idx] = fmt.Sprintf("## REPOSITORY: %s/%s\n\n%s", br.Owner, br.Repo, report)
+				}(i)
 			}
+			wg.Wait()
+			_ = cc.Flush()
 			spin.Stop()
 
 			repoNames := ""
