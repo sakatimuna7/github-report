@@ -35,11 +35,12 @@ Rules:
 const ReduceSysPrompt = `Role: SE
 Task: Merge commit summaries
 Rules:
+- preserve repository grouping if present
 - remove duplicates
 - keep most important
-- group by category
+- group by category within each repository
 - for 'feat': keep detailed sub-bullets, do not limit
-- max 7 bullets total (except 'feat')`
+- max 15 bullets total (except 'feat')`
 
 // Stats holds pipeline execution statistics.
 type Stats struct {

@@ -53,6 +53,11 @@ func (c *Client) GetReportData(ctx context.Context, owner, repo, branch string, 
 	for {
 		commits, resp, err := c.client.Repositories.ListCommits(ctx, owner, repo, opts)
 		if err != nil {
+			// If branch not found, try empty SHA (GitHub will use default branch)
+			if opts.SHA != "" {
+				opts.SHA = ""
+				continue
+			}
 			return "", CommitStats{}, fmt.Errorf("error fetching commits: %w", err)
 		}
 		
