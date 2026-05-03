@@ -181,13 +181,13 @@ func (c *Client) GetDashboardData(ctx context.Context, username string) (Dashboa
 		Contributions: make([]int, 30),
 	}
 
-	// 1. Languages (Top 20 repos for performance)
+	// 1. Languages (Top 20 repos)
 	repos, _, err := c.client.Repositories.List(ctx, "", &github.RepositoryListOptions{
-		Sort:        "updated",
 		ListOptions: github.ListOptions{PerPage: 20},
 	})
 	if err == nil {
 		for _, r := range repos {
+			if r.GetOwner() == nil { continue }
 			langs, _, err := c.client.Repositories.ListLanguages(ctx, r.GetOwner().GetLogin(), r.GetName())
 			if err == nil {
 				for l, bytes := range langs {

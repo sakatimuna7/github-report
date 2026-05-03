@@ -63,6 +63,13 @@ func RenderDashboard(data github.DashboardData) string {
 		bar,
 		"\n"+legend,
 	)
+	
+	if len(langs) == 0 {
+		stackView = lipgloss.JoinVertical(lipgloss.Left,
+			atoms.TitleStyle.Render(" Global Project Stack"),
+			color.HiBlackString("  No language data available (Check GITHUB_TOKEN)"),
+		)
+	}
 
 	// 2. Contributions Chart
 	maxContrib := 1
@@ -94,5 +101,8 @@ func RenderDashboard(data github.DashboardData) string {
 		chart,
 	)
 
-	return cardStyle.Render(lipgloss.JoinVertical(lipgloss.Left, stackView, "\n", contribView))
+	return lipgloss.JoinVertical(lipgloss.Left, 
+		cardStyle.Render(stackView),
+		cardStyle.Render(contribView),
+	)
 }
