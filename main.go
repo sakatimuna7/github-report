@@ -1104,7 +1104,8 @@ skipMenuLoop:
 			report, _ := fb(mm, sp, merged)
 			spin.Stop()
 
-			reportContent = fmt.Sprintf("%s\n\nUsage: %d Prompt | %d Completion | %d Total Tokens\n", report, usage.PromptTokens, usage.CompletionTokens, usage.TotalTokens)
+			header := fmt.Sprintf("# REPORT: %s/%s\n\n", *owner, *repo)
+			reportContent = fmt.Sprintf("%s%s\n\nUsage: %d Prompt | %d Completion | %d Total Tokens\n", header, report, usage.PromptTokens, usage.CompletionTokens, usage.TotalTokens)
 			
 			// Save to cache
 			_ = pipeline.SaveReportResult(cacheFile, pipeline.ReportResult{

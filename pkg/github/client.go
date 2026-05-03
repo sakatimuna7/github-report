@@ -76,6 +76,28 @@ func (c *Client) GetReportData(ctx context.Context, owner, repo, branch string, 
 	sb.WriteString(fmt.Sprintf("Repo: %s/%s | Branch: %s\n\n", owner, repo, branch))
 	sb.WriteString(fmt.Sprintf("Total activity fetched: %d commits\n", len(allCommits)))
 
+	// Phase 2: Pre-fetch Referenced Issues & PRs for deep context
+	issueRegex := regexp.MustCompile(`(?i)(?:fixes|resolves|closes|refs)?\s*#(\d+)`)
+	issueMap := make(map[string]*github.Issue)
+	uniqueIDs := make(map[int]bool)
+
+	for _, commit := range allCommits {
+		matches := issueRegex.FindAllStringSubmatch(commit.GetCommit().GetMessage(), -1)
+		for _, m := range matches {
+			if len(m) > 1 {
+				id, _ := strconv.Atoi(m[1])
+				uniqueIDs[id] = true
+			}
+		}
+	}
+
+	for id := range uniqueIDs {
+		issue, _, err := c.client.Issues.Get(ctx, owner, repo, id)
+		if err == nil && issue != nil {
+			issueMap[strconv.Itoa(id)] = issue
+		}
+	}
+
 	lastDate := ""
 	for _, commit := range allCommits {
 		fullMsg := commit.GetCommit().GetMessage()
@@ -107,32 +129,29 @@ func (c *Client) GetReportData(ctx context.Context, owner, repo, branch string, 
 			lastDate = fullDate
 		}
 		
-		sb.WriteString(fmt.Sprintf("- %s (by %s)\n", shortMsg, author))
-	}
-
-	// Phase 3: Issue & PR Cross-Referencing
-	issueRegex := regexp.MustCompile(`(?i)(?:fixes|resolves|closes|refs)?\s*#(\d+)`)
-	issueSet := make(map[string]bool)
-	for _, commit := range allCommits {
-		matches := issueRegex.FindAllStringSubmatch(commit.GetCommit().GetMessage(), -1)
+		// Enrich message with issue titles if found
+		enrichedMsg := shortMsg
+		matches := issueRegex.FindAllStringSubmatch(fullMsg, -1)
 		for _, m := range matches {
 			if len(m) > 1 {
-				issueSet[m[1]] = true
-			}
-		}
-	}
-
-	if len(issueSet) > 0 {
-		sb.WriteString("\n\n[Referenced Issues & PRs]\n")
-		for idStr := range issueSet {
-			id, err := strconv.Atoi(idStr)
-			if err == nil {
-				issue, _, err := c.client.Issues.Get(ctx, owner, repo, id)
-				if err == nil && issue != nil {
-					state := issue.GetState()
-					sb.WriteString(fmt.Sprintf("- #%d [%s]: %s\n", id, state, issue.GetTitle()))
+				if issue, ok := issueMap[m[1]]; ok {
+					enrichedMsg += fmt.Sprintf(" (Issue Context: %s)", issue.GetTitle())
 				}
 			}
+		}
+
+		sb.WriteString(fmt.Sprintf("- %s (by %s)\n", enrichedMsg, author))
+	}
+
+	if len(issueMap) > 0 {
+		sb.WriteString("\n\n[Deep Context: Referenced Issues & PRs]\n")
+		for id, issue := range issueMap {
+			body := issue.GetBody()
+			if len(body) > 300 {
+				body = body[:300] + "..."
+			}
+			body = strings.ReplaceAll(body, "\n", " ")
+			sb.WriteString(fmt.Sprintf("- #%s [%s]: %s\n  Summary: %s\n", id, issue.GetState(), issue.GetTitle(), body))
 		}
 	}
 

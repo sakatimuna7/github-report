@@ -27,22 +27,25 @@ func LoadTemplates() (map[string]string, error) {
 	dir := filepath.Join(home, ".ghreport_templates")
 	if _, err := os.Stat(dir); os.IsNotExist(err) {
 		_ = os.MkdirAll(dir, 0755)
-		
-		defaults := map[string]string{
-			"Summary":   "Gambaran umum tentang progress yang dikerjakan.",
-			"Changes":   "Fokus pada perubahan utama dan fitur baru yang diimplementasikan.",
-			"Risk":      "Deteksi masalah, bug, atau risiko teknis dari commit data.",
-			"Recommend": "Saran teknis atau improvement untuk kedepannya.",
-			"Changelog": "Human-readable release notes untuk stakeholder.",
-			"Default":   defaultTemplate,
-		}
+	}
 
-		for name, desc := range defaults {
+	defaults := map[string]string{
+		"Summary":   "Berikan ringkasan eksekutif tentang kemajuan proyek, pencapaian utama, dan status saat ini dalam bahasa yang profesional.",
+		"Changes":   "Identifikasi perubahan fitur (Feat), perbaikan (Fix), dan peningkatan (Perf). Jelaskan dampak teknis dari perubahan tersebut.",
+		"Risk":      "Analisis potensi resiko, bug, atau hutang teknis yang mungkin muncul dari pola perubahan kode yang ada.",
+		"Recommend": "Berikan rekomendasi teknis untuk langkah selanjutnya atau area yang memerlukan optimasi berdasarkan aktivitas commit.",
+		"Changelog": "Buat catatan rilis (Release Notes) yang rapi, informatif, dan mudah dipahami oleh stakeholder non-teknis.",
+		"Default":   defaultTemplate,
+	}
+
+	for name, desc := range defaults {
+		path := filepath.Join(dir, name+".txt")
+		if _, err := os.Stat(path); os.IsNotExist(err) {
 			content := defaultTemplate
 			if name != "Default" {
 				content = strings.ReplaceAll(defaultTemplate, "Focus: {{FOCUS}}", "Focus: "+desc)
 			}
-			_ = os.WriteFile(filepath.Join(dir, name+".txt"), []byte(content), 0644)
+			_ = os.WriteFile(path, []byte(content), 0644)
 		}
 	}
 
