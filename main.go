@@ -1,6 +1,7 @@
 package main
 
 import (
+	"encoding/base64"
 	"fmt"
 	"os"
 
@@ -20,6 +21,8 @@ var (
 	Version   = "dev"
 	Commit    = "none"
 	BuildTime = "unknown"
+	EncodedGeminiKey = "" // Injected at build time
+	EncodedGoogleCredentials = "" // Injected at build time (JSON content)
 	latestRelease *selfupdate.Release
 )
 
@@ -48,6 +51,22 @@ func main() {
 	confPath := h + "/.ghreport"
 	if h != "" {
 		_ = config.LoadEnv(confPath)
+	}
+
+	// Fallback to embedded Gemini key if not set in environment
+	if os.Getenv("GEMINI_API_KEY") == "" && EncodedGeminiKey != "" {
+		decoded, err := base64.StdEncoding.DecodeString(EncodedGeminiKey)
+		if err == nil {
+			os.Setenv("GEMINI_API_KEY", string(decoded))
+		}
+	}
+
+	// Fallback to embedded Google Credentials if not set in environment
+	if os.Getenv("GOOGLE_CREDENTIALS_JSON") == "" && EncodedGoogleCredentials != "" {
+		decoded, err := base64.StdEncoding.DecodeString(EncodedGoogleCredentials)
+		if err == nil {
+			os.Setenv("GOOGLE_CREDENTIALS_JSON", string(decoded))
+		}
 	}
 
 	if isCI {

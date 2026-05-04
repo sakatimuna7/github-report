@@ -6,7 +6,13 @@ VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo "v0.
 COMMIT ?= $(shell git rev-parse --short HEAD 2>/dev/null || echo "none")
 BUILD_TIME ?= $(shell date -u +%Y-%m-%dT%H:%M:%SZ)
 
-LDFLAGS = -X main.Version=$(VERSION) -X main.Commit=$(COMMIT) -X main.BuildTime=$(BUILD_TIME)
+# Secrets (Optional, injected via build flags)
+GEMINI_KEY ?= ""
+GOOGLE_CREDS ?= ""
+
+LDFLAGS = -X main.Version=$(VERSION) -X main.Commit=$(COMMIT) -X main.BuildTime=$(BUILD_TIME) \
+          -X main.EncodedGeminiKey=$(GEMINI_KEY) \
+          -X main.EncodedGoogleCredentials=$(GOOGLE_CREDS)
 
 .PHONY: all build install clean run release publish
 

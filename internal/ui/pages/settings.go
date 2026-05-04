@@ -38,6 +38,7 @@ func RunSettings(path string, runFilePicker func() string, runTemplateManager fu
 		dName := os.Getenv("DEVELOPER_NAME")
 		divisi := os.Getenv("DIVISI")
 		credPath := os.Getenv("GOOGLE_CREDENTIALS_PATH")
+		credJSON := os.Getenv("GOOGLE_CREDENTIALS_JSON")
 
 		sIdStr := color.RedString("Not Set")
 		if sID != "" { sIdStr = color.GreenString("Set") }
@@ -45,8 +46,13 @@ func RunSettings(path string, runFilePicker func() string, runTemplateManager fu
 		if dName != "" { dNameStr = color.GreenString("Set") }
 		divisiStr := color.RedString("Not Set")
 		if divisi != "" { divisiStr = color.GreenString("Set") }
+		
 		credPathStr := color.RedString("Not Set")
-		if credPath != "" { credPathStr = color.GreenString("Set") }
+		if credPath != "" { 
+			credPathStr = color.GreenString("File Set") 
+		} else if credJSON != "" {
+			credPathStr = color.GreenString("Embedded")
+		}
 
 		items := []list.Item{
 			molecules.NewMenuItem("Groq API Key", "Status: " + gkS, "Groq"),

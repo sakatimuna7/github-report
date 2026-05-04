@@ -110,9 +110,18 @@ func saveToken(path string, token *oauth2.Token) {
 
 func NewService(credFile, tokFile string) (*sheets.Service, error) {
 	ctx := context.Background()
-	b, err := os.ReadFile(credFile)
-	if err != nil {
-		return nil, fmt.Errorf("unable to read client secret file: %v", err)
+	var b []byte
+	var err error
+
+	// 1. Try from environment variable (Embedded JSON)
+	if credJSON := os.Getenv("GOOGLE_CREDENTIALS_JSON"); credJSON != "" {
+		b = []byte(credJSON)
+	} else {
+		// 2. Try from file path
+		b, err = os.ReadFile(credFile)
+		if err != nil {
+			return nil, fmt.Errorf("unable to read client secret file: %v", err)
+		}
 	}
 
 	// If modifying these scopes, delete your previously saved token.json.

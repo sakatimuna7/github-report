@@ -126,10 +126,22 @@ fi
 echo -e "${CYAN}🏷️  Creating git tag $version...${NC}"
 git tag -a "$version" -m "$title"
 
-# 7. Build binaries with explicit version
-echo -e "${CYAN}🏗️  Building binaries for all platforms...${NC}"
+# 7. Build binaries with explicit version and embedded secrets
+echo -e "${CYAN}🏗️  Building binaries for all platforms (with embedded secrets)...${NC}"
 make clean
-VERSION=$version make release
+
+# Encode secrets for injection
+ENCODED_GEMINI=""
+if [[ -n "$GEMINI_API_KEY" ]]; then
+    ENCODED_GEMINI=$(echo -n "$GEMINI_API_KEY" | base64 | tr -d '\n')
+fi
+
+ENCODED_CREDS=""
+if [[ -n "$GOOGLE_CREDENTIALS" ]]; then
+    ENCODED_CREDS=$(echo -n "$GOOGLE_CREDENTIALS" | base64 | tr -d '\n')
+fi
+
+VERSION=$version GEMINI_KEY="$ENCODED_GEMINI" GOOGLE_CREDS="$ENCODED_CREDS" make release
 
 echo -e "${CYAN}⬆️  Pushing tag to origin...${NC}"
 git push origin "$version"
