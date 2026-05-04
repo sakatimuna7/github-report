@@ -17,33 +17,80 @@ Rules:
 - Buat se-ringkas mungkin namun informatif.
 - Jangan mengulangi kalimat yang sama.`
 
+var dailyReportTemplate = `Role: Senior Software Engineer
+Task: Analisis commit data dan buat laporan harian yang ringkas dan akurat.
+Language: Bahasa Indonesia
+Context: {{CONTEXT}}
+
+Format output:
+
+**SUMMARY**
+2-3 kalimat ringkasan pencapaian hari ini dan status progress.
+
+**CHANGES**
+- [Feat] Fitur baru yang diselesaikan
+- [Fix] Bug yang diperbaiki
+- [Perf] Optimasi atau refactoring
+- [Docs] Update dokumentasi (jika ada)
+
+**RISK**
+- Potensi bug atau breaking changes
+- Technical debt yang teridentifikasi
+- Area yang butuh testing lebih
+Jika tidak ada: "Tidak ada risiko signifikan teridentifikasi."
+
+**RECOMMEND**
+- Prioritas testing atau review
+- Task follow-up untuk besok
+- Area yang perlu optimasi
+
+**CHANGELOG**
+Format release notes untuk stakeholder:
+- Versi: [jika ada tag]
+- Added: Fitur baru
+- Fixed: Perbaikan bug
+- Changed: Perubahan behavior
+- Improved: Peningkatan performa
+
+Rules:
+- Bold HANYA untuk judul bagian
+- Max 3-4 poin per bagian
+- Fokus dampak bisnis, bukan detail teknis
+- Hindari pengulangan informasi
+- Jika bagian kosong, tulis 1 kalimat "Tidak ada [nama bagian]"`
+
 // LoadTemplates ensures the templates directory exists and returns available templates.
 func LoadTemplates() (map[string]string, error) {
 	home, err := os.UserHomeDir()
 	if err != nil {
 		return nil, err
 	}
-	
+
 	dir := filepath.Join(home, ".ghreport_templates")
 	if _, err := os.Stat(dir); os.IsNotExist(err) {
 		_ = os.MkdirAll(dir, 0755)
 	}
 
 	defaults := map[string]string{
-		"Summary":   "Berikan ringkasan eksekutif tentang kemajuan proyek, pencapaian utama, dan status saat ini dalam bahasa yang profesional.",
-		"Changes":   "Identifikasi perubahan fitur (Feat), perbaikan (Fix), dan peningkatan (Perf). Jelaskan dampak teknis dari perubahan tersebut.",
-		"Risk":      "Analisis potensi resiko, bug, atau hutang teknis yang mungkin muncul dari pola perubahan kode yang ada.",
-		"Recommend": "Berikan rekomendasi teknis untuk langkah selanjutnya atau area yang memerlukan optimasi berdasarkan aktivitas commit.",
-		"Changelog": "Buat catatan rilis (Release Notes) yang rapi, informatif, dan mudah dipahami oleh stakeholder non-teknis.",
-		"Default":   defaultTemplate,
+		"Summary":     "Ringkasan eksekutif: pencapaian utama, progress, dan status proyek saat ini.",
+		"Changes":     "Kategorikan perubahan: Feat (fitur), Fix (perbaikan), Perf (optimasi). Fokus dampak teknis.",
+		"Risk":        "Identifikasi: breaking changes, potensi bug, technical debt, area berisiko.",
+		"Recommend":   "Saran teknis: prioritas testing, area optimasi, task follow-up.",
+		"Changelog":   "Release notes untuk stakeholder: Added, Fixed, Changed, Improved.",
+		"DailyReport": dailyReportTemplate,
+		"Default":     defaultTemplate,
 	}
 
 	for name, desc := range defaults {
 		path := filepath.Join(dir, name+".txt")
 		if _, err := os.Stat(path); os.IsNotExist(err) {
-			content := defaultTemplate
-			if name != "Default" {
+			var content string
+			if name == "DailyReport" {
+				content = dailyReportTemplate
+			} else if name != "Default" {
 				content = strings.ReplaceAll(defaultTemplate, "Focus: {{FOCUS}}", "Focus: "+desc)
+			} else {
+				content = defaultTemplate
 			}
 			_ = os.WriteFile(path, []byte(content), 0644)
 		}
@@ -64,7 +111,7 @@ func LoadTemplates() (map[string]string, error) {
 			}
 		}
 	}
-	
+
 	if len(templates) == 0 {
 		templates["Default"] = defaultTemplate
 	}

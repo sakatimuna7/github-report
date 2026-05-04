@@ -68,6 +68,20 @@ func DoUpdate(latest *selfupdate.Release) {
 		return
 	}
 
+	// Check for write permission before downloading
+	file, err := os.OpenFile(exe, os.O_WRONLY, 0666)
+	if err != nil {
+		if os.IsPermission(err) {
+			color.Red("❌ Permission denied: Cannot write to %s", exe)
+			color.Yellow("Tip: Please run with 'sudo' to update this application.")
+			color.HiBlackString("Example: sudo %s", os.Args[0])
+			fmt.Println()
+			return
+		}
+	} else {
+		file.Close()
+	}
+
 	onProgress := func(downloaded, total int64) {
 		if total <= 0 {
 			return
