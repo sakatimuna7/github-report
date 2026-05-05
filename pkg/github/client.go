@@ -28,10 +28,13 @@ func NewClient(token string) *Client {
 }
 
 type CommitStats struct {
-	Total    int
-	Features int
-	Fixes    int
-	Overtime int
+	Total     int
+	Features  int
+	Fixes     int
+	Refactors int
+	Docs      int
+	Others    int
+	Overtime  int
 }
 
 func (c *Client) GetReportData(ctx context.Context, owner, repo, branch string, limit int, since, until time.Time, workStart, workEnd int) (string, CommitStats, error) {
@@ -114,6 +117,12 @@ func (c *Client) GetReportData(ctx context.Context, owner, repo, branch string, 
 			stats.Features++
 		} else if strings.HasPrefix(lowerMsg, "fix") {
 			stats.Fixes++
+		} else if strings.HasPrefix(lowerMsg, "refactor") || strings.HasPrefix(lowerMsg, "perf") || strings.HasPrefix(lowerMsg, "style") {
+			stats.Refactors++
+		} else if strings.HasPrefix(lowerMsg, "docs") {
+			stats.Docs++
+		} else {
+			stats.Others++
 		}
 		
 		// Overtime check: Outside workStart to workEnd

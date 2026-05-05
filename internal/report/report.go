@@ -9,6 +9,7 @@ import (
 	"sync"
 	"time"
 
+	"github-report-ai/internal/ui/molecules"
 	"github-report-ai/internal/ui/organisms"
 	"github-report-ai/internal/utils"
 	"github-report-ai/pkg/ai"
@@ -324,6 +325,19 @@ skipMenuLoop:
 		}
 		spin.Stop()
 
+		// --- Feature: AI Security Auditor ---
+		var securityWarnings []string
+		if !*ciMode && len(allRaw) > 0 {
+			spin.Suffix = color.HiBlackString(" Running AI Security Audit...")
+			spin.Restart()
+			key := *gm
+			if strings.HasPrefix(*mod, "groq") {
+				key = *gk
+			}
+			securityWarnings, _ = AuditSecurity(c, *mod, key, strings.Join(allRaw, "\n"))
+			spin.Stop()
+		}
+
 		if len(allRaw) == 0 {
 			color.Red("❌ No data fetched from any repository.")
 			return
@@ -338,6 +352,8 @@ skipMenuLoop:
 		}
 		rows := []table.Row{{fmt.Sprintf("%d", stats.Total), fmt.Sprintf("%d", stats.Features), fmt.Sprintf("%d", stats.Fixes), fmt.Sprintf("%d", stats.Overtime)}}
 		t := table.New(table.WithColumns(columns), table.WithRows(rows), table.WithFocused(false), table.WithHeight(3))
+
+		contributionMap := molecules.RenderContributionMap(stats)
 
 		purple := lipgloss.Color("99")
 		st := table.DefaultStyles()
@@ -372,7 +388,14 @@ skipMenuLoop:
 		for {
 			action = ""
 			var fields []huh.Field
-			fields = append(fields, huh.NewNote().Title("Review Selections").Description(selectionSummary), huh.NewNote().Title("Commit Statistics").Description(summary))
+			fields = append(fields, huh.NewNote().Title("Review Selections").Description(selectionSummary))
+			
+			if len(securityWarnings) > 0 {
+				warnMsg := color.RedString("⚠️  SECURITY ALERT: Potential secrets found in commits!\n\n") + strings.Join(securityWarnings, "\n")
+				fields = append(fields, huh.NewNote().Title("🚨 Security Findings").Description(warnMsg))
+			}
+
+			fields = append(fields, huh.NewNote().Title("Commit Statistics").Description(summary + "\n" + contributionMap))
 			var proceed bool
 			if hasCache {
 				fields = append(fields, huh.NewNote().Title("✨ Cached Report Found").Description(cacheNote),
