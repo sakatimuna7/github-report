@@ -373,11 +373,11 @@ skipMenuLoop:
 			action = ""
 			var fields []huh.Field
 			fields = append(fields, huh.NewNote().Title("Review Selections").Description(selectionSummary), huh.NewNote().Title("Commit Statistics").Description(summary))
+			var proceed bool
 			if hasCache {
 				fields = append(fields, huh.NewNote().Title("✨ Cached Report Found").Description(cacheNote),
 					huh.NewSelect[string]().Title("What would you like to do?").Options(huh.NewOption("Use Cached Report", "cache"), huh.NewOption("Regenerate (New AI Call)", "regen_ai"), huh.NewOption("Go Back / Cancel", "back")).Value(&action))
 			} else if !*ciMode {
-				var proceed bool
 				fields = append(fields, huh.NewConfirm().Title("Proceed to generate AI report?").Affirmative("Yes, execute").Negative("No, go back").Value(&proceed))
 			}
 
@@ -386,7 +386,19 @@ skipMenuLoop:
 				if err != nil { break reportLoop }
 			}
 
-			if *ciMode { if hasCache { action = "cache" } else { action = "regen_ai" } } else if !hasCache { action = "regen_ai" }
+			if *ciMode {
+				if hasCache {
+					action = "cache"
+				} else {
+					action = "regen_ai"
+				}
+			} else if !hasCache {
+				if proceed {
+					action = "regen_ai"
+				} else {
+					action = "back"
+				}
+			}
 			if action == "back" || action == "" { break reportLoop }
 
 			var reportContent string
