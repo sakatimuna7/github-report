@@ -43,6 +43,9 @@ func (m ReportViewerModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case "e":
 			m.Action = "export_sheets"
 			return m, tea.Quit
+		case "t":
+			m.Action = "edit"
+			return m, tea.Quit
 		case "c":
 			c := exec.Command("pbcopy")
 			c.Stdin = strings.NewReader(m.Content)
@@ -96,9 +99,9 @@ func (m ReportViewerModel) View() string {
 
 	header := headerStyle.Render("✨ GITHUB REPORT GENERATED")
 	
-	footerText := fmt.Sprintf("%3.f%% • [c] copy • [p] print • [e] export sheets • [r] regen • [q] quit", m.Viewport.ScrollPercent()*100)
+	footerText := fmt.Sprintf("%3.f%% • [c] copy • [t] edit • [p] print • [e] export sheets • [r] regen • [q] quit", m.Viewport.ScrollPercent()*100)
 	if m.Toast != "" {
-		footerText = fmt.Sprintf("%3.f%% • %s • [c] copy • [p] print • [e] export • [r] regen • [q] quit", m.Viewport.ScrollPercent()*100, m.Toast)
+		footerText = fmt.Sprintf("%3.f%% • %s • [c] copy • [t] edit • [p] print • [e] export • [r] regen • [q] quit", m.Viewport.ScrollPercent()*100, m.Toast)
 	}
 	footer := footerStyle.Render(footerText)
 

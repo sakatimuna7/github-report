@@ -480,7 +480,31 @@ skipMenuLoop:
 				model, err := p.Run()
 				if err != nil { return }
 				finalModel := model.(organisms.ReportViewerModel)
-				if finalModel.Action == "regen" { hasCache = false; continue reportLoop } else if finalModel.Action == "print" { fmt.Println("\n" + reportContent + "\n"); continue reportLoop } else if finalModel.Action == "export_sheets" { doExport = true } else { break reportLoop }
+				if finalModel.Action == "regen" {
+					hasCache = false
+					continue reportLoop
+				} else if finalModel.Action == "edit" {
+					err := huh.NewForm(
+						huh.NewGroup(
+							huh.NewText().
+								Title("Edit Report Content").
+								Description("Modify the AI generated report (Press Ctrl+E for external editor)").
+								Value(&reportContent).
+								Lines(20),
+						),
+					).Run()
+					if err != nil {
+						continue reportLoop
+					}
+					continue reportLoop
+				} else if finalModel.Action == "print" {
+					fmt.Println("\n" + reportContent + "\n")
+					continue reportLoop
+				} else if finalModel.Action == "export_sheets" {
+					doExport = true
+				} else {
+					break reportLoop
+				}
 			}
 			if doExport {
 				spin.Suffix = color.HiBlackString(" Exporting to Google Sheets..."); spin.Restart()
