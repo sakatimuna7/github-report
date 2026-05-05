@@ -7,6 +7,7 @@ import (
 	"encoding/base64"
 	"io"
 	"os"
+	"path/filepath"
 
 	"github.com/joho/godotenv"
 )
@@ -24,7 +25,7 @@ func LoadEnv(path string) error {
 		if dec != nil {
 			m, _ := godotenv.Unmarshal(string(dec))
 			for k, v := range m {
-				if os.Getenv(k) == "" {
+				if v != "" {
 					os.Setenv(k, v)
 				}
 			}
@@ -35,7 +36,7 @@ func LoadEnv(path string) error {
 }
 
 func GetEncryptionKey(home string) []byte {
-	keyPath := home + "/.ghreport.key"
+	keyPath := filepath.Join(home, ".ghreport.key")
 	keyData, err := os.ReadFile(keyPath)
 	if err == nil && len(keyData) == 32 {
 		return keyData

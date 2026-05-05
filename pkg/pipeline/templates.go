@@ -18,46 +18,53 @@ Rules:
 - Jangan mengulangi kalimat yang sama.`
 
 var dailyReportTemplate = `Role: Senior Software Engineer
-Task: Analisis commit data dan buat laporan harian yang ringkas dan akurat.
+Task: Analisis commit data dan buat laporan harian yang ringkas, akurat, dan mudah dipahami.
 Language: Bahasa Indonesia
 Context: {{CONTEXT}}
 
-Format output:
+Format output yang WAJIB diikuti:
 
-**SUMMARY**
-2-3 kalimat ringkasan pencapaian hari ini dan status progress.
+**[NAMA PROJECT/MODULE]**
+- [prefix]: deskripsi perubahan dalam satu kalimat yang jelas dan ringkas
+- [prefix]: deskripsi perubahan dalam satu kalimat yang jelas dan ringkas
+...
 
-**CHANGES**
-- [Feat] Fitur baru yang diselesaikan
-- [Fix] Bug yang diperbaiki
-- [Perf] Optimasi atau refactoring
-- [Docs] Update dokumentasi (jika ada)
+Prefix yang digunakan:
+- feat: untuk fitur baru
+- fix: untuk perbaikan bug atau issue
+- chore: untuk perubahan konfigurasi, dependency, atau maintenance
+- refactor: untuk refactoring kode tanpa mengubah behavior
+- perf: untuk optimasi performa
+- docs: untuk perubahan dokumentasi
+- style: untuk perubahan formatting kode
+- test: untuk penambahan atau perbaikan test
 
-**RISK**
-- Potensi bug atau breaking changes
-- Technical debt yang teridentifikasi
-- Area yang butuh testing lebih
-Jika tidak ada: "Tidak ada risiko signifikan teridentifikasi."
+Aturan penulisan:
+1. Kelompokkan commits berdasarkan project/module (misal: "Tryout Kita", "Presensi", "API Gateway")
+2. Setiap baris dimulai dengan "- [prefix]: " diikuti deskripsi
+3. Deskripsi harus dalam 1 kalimat yang ringkas namun informatif
+4. Fokus pada WHAT (apa yang berubah) dan WHY (kenapa penting), bukan HOW (detail teknis)
+5. Gunakan bahasa Indonesia formal tapi natural
+6. Hindari jargon teknis yang terlalu kompleks kecuali diperlukan
+7. Jika ada breaking change, tambahkan indikator (BREAKING) setelah prefix
+8. Urutkan dari yang paling penting/berdampak besar
+9. Jangan mengulang informasi yang sama
+10. JANGAN gunakan bold (**) kecuali untuk nama project/module
+11. Gunakan kata kerja aktif: "menambahkan", "memperbaiki", "memperbarui", "menghapus"
+12. Jika commit message tidak jelas, interpretasikan dengan konteks yang ada
 
-**RECOMMEND**
-- Prioritas testing atau review
-- Task follow-up untuk besok
-- Area yang perlu optimasi
+Contoh format:
+**Dashboard Admin**
+- feat: menambahkan filter status pembayaran pada halaman daftar transaksi
+- fix: memperbaiki bug pagination yang menampilkan data duplikat
+- chore: memperbarui dependency React ke versi 18.3.0
 
-**CHANGELOG**
-Format release notes untuk stakeholder:
-- Versi: [jika ada tag]
-- Added: Fitur baru
-- Fixed: Perbaikan bug
-- Changed: Perubahan behavior
-- Improved: Peningkatan performa
+**User Service**
+- feat: mengimplementasikan reset password via email
+- fix: memperbaiki validasi format nomor telepon Indonesia
+- perf: mengoptimalkan query database dengan menambahkan index pada kolom email
 
-Rules:
-- Bold HANYA untuk judul bagian
-- Max 3-4 poin per bagian
-- Fokus dampak bisnis, bukan detail teknis
-- Hindari pengulangan informasi
-- Jika bagian kosong, tulis 1 kalimat "Tidak ada [nama bagian]"`
+PENTING: Output HARUS berupa daftar bullet points yang dikelompokkan per project, BUKAN dalam format bagian-bagian seperti SUMMARY, CHANGES, RISK, dll.`
 
 // LoadTemplates ensures the templates directory exists and returns available templates.
 func LoadTemplates() (map[string]string, error) {

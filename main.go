@@ -49,7 +49,7 @@ func main() {
 
 	_ = godotenv.Load()
 	h, _ := os.UserHomeDir()
-	confPath := h + "/.ghreport"
+	confPath := filepath.Join(h, ".ghreport")
 	if h != "" {
 		_ = config.LoadEnv(confPath)
 	}
