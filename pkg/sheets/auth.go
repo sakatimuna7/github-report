@@ -47,9 +47,8 @@ func getTokenFromWeb(config *oauth2.Config) (*oauth2.Token, error) {
 	codeCh := make(chan string)
 	errCh := make(chan error)
 	
-	srv := &http.Server{Addr: ":8080"}
-	
-	http.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+	mux := http.NewServeMux()
+	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 		code := r.URL.Query().Get("code")
 		if code == "" {
 			fmt.Fprintf(w, "Error: Tidak ada kode otorisasi di URL.")
@@ -60,6 +59,11 @@ func getTokenFromWeb(config *oauth2.Config) (*oauth2.Token, error) {
 		fmt.Fprintf(w, "<html><body style='font-family: sans-serif; text-align: center; padding-top: 50px;'><h1>✅ Login Berhasil!</h1><p>Kredensial telah dikirim ke terminal. Silakan tutup jendela ini.</p></body></html>")
 		codeCh <- code
 	})
+	
+	srv := &http.Server{
+		Addr:    ":8080",
+		Handler: mux,
+	}
 	
 	go func() {
 		if err := srv.ListenAndServe(); err != http.ErrServerClosed {
