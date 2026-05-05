@@ -353,7 +353,6 @@ skipMenuLoop:
 		rows := []table.Row{{fmt.Sprintf("%d", stats.Total), fmt.Sprintf("%d", stats.Features), fmt.Sprintf("%d", stats.Fixes), fmt.Sprintf("%d", stats.Overtime)}}
 		t := table.New(table.WithColumns(columns), table.WithRows(rows), table.WithFocused(false), table.WithHeight(3))
 
-		contributionMap := molecules.RenderContributionMap(stats)
 
 		purple := lipgloss.Color("99")
 		st := table.DefaultStyles()
@@ -395,7 +394,11 @@ skipMenuLoop:
 				fields = append(fields, huh.NewNote().Title("🚨 Security Findings").Description(warnMsg))
 			}
 
-			fields = append(fields, huh.NewNote().Title("Commit Statistics").Description(summary + "\n" + contributionMap))
+			contributionMap := molecules.RenderContributionMap(stats)
+			petView := molecules.RenderPet(stats)
+			statsView := lipgloss.JoinHorizontal(lipgloss.Top, contributionMap, "  ", petView)
+
+			fields = append(fields, huh.NewNote().Title("Commit Statistics").Description(summary + "\n" + statsView))
 			var proceed bool
 			if hasCache {
 				fields = append(fields, huh.NewNote().Title("✨ Cached Report Found").Description(cacheNote),
