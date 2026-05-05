@@ -15,6 +15,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/creativeprojects/go-selfupdate"
 	"github.com/joho/godotenv"
+	"path/filepath"
 )
 
 var (
