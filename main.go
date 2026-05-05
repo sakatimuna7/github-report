@@ -45,6 +45,7 @@ func main() {
 	}
 
 	latestRelease = updater.CheckForUpdates(Version)
+	report.CheckGitHubCLI()
 
 	_ = godotenv.Load()
 	h, _ := os.UserHomeDir()
