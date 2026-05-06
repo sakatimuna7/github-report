@@ -145,28 +145,7 @@ func Run(confPath string) {
 						if len(p) >= 2 {
 							ownerVal, repoVal := p[len(p)-2], p[len(p)-1]
 							
-							// Fetch branches for this repo
-							spin := spinner.New(spinner.CharSets[14], 100*time.Millisecond)
-							spin.Suffix = color.HiBlackString(" Fetching branches for %s/%s...", ownerVal, repoVal)
-							spin.Start()
-							
-							if *tok == "" { *tok = utils.Sh("gh", "auth", "token") }
-							branches, bErr := github.NewClient(*tok).ListBranches(context.Background(), ownerVal, repoVal)
-							spin.Stop()
-							
-							selectedBranch := ""
-							if bErr == nil && len(branches) > 0 {
-								var bOpts []huh.Option[string]
-								for _, brName := range branches {
-									bOpts = append(bOpts, huh.NewOption(brName, brName))
-								}
-								err = huh.NewSelect[string]().
-									Title(fmt.Sprintf("Select Branch for %s/%s", ownerVal, repoVal)).
-									Options(bOpts...).
-									Value(&selectedBranch).
-									Run()
-							}
-							
+							selectedBranch, _ := fetchAndSelectBranch(context.Background(), *tok, ownerVal, repoVal)
 							batchRepos = append(batchRepos, repoInfo{Owner: ownerVal, Repo: repoVal, Branch: selectedBranch})
 						}
 					}
@@ -223,7 +202,17 @@ func Run(confPath string) {
 			if len(parts) >= 2 {
 				*owner = parts[len(parts)-2]
 				*repo = parts[len(parts)-1]
-				batchRepos = []repoInfo{{*owner, *repo, ""}}
+				
+				selectedBranch := ""
+				// Only ask for branch if NOT Current Directory
+				if selected != fmt.Sprintf("%s/%s", localOwner, localRepo) {
+					selectedBranch, _ = fetchAndSelectBranch(context.Background(), *tok, *owner, *repo)
+				}
+				
+				batchRepos = []repoInfo{{Owner: *owner, Repo: *repo, Branch: selectedBranch}}
+				if selectedBranch != "" {
+					*branch = selectedBranch
+				}
 			}
 			break
 		}
@@ -579,4 +568,36 @@ skipMenuLoop:
 			}
 		}
 	}
+}
+func fetchAndSelectBranch(ctx context.Context, tok, owner, repo string) (string, error) {
+	spin := spinner.New(spinner.CharSets[14], 100*time.Millisecond)
+	spin.Suffix = color.HiBlackString(" Fetching branches for %s/%s...", owner, repo)
+	spin.Start()
+
+	if tok == "" {
+		tok = utils.Sh("gh", "auth", "token")
+	}
+	branches, bErr := github.NewClient(tok).ListBranches(ctx, owner, repo)
+	spin.Stop()
+
+	if bErr != nil || len(branches) == 0 {
+		return "", bErr
+	}
+
+	if len(branches) == 1 {
+		return branches[0], nil
+	}
+
+	var selectedBranch string
+	var bOpts []huh.Option[string]
+	for _, brName := range branches {
+		bOpts = append(bOpts, huh.NewOption(brName, brName))
+	}
+	err := huh.NewSelect[string]().
+		Title(fmt.Sprintf("Select Branch for %s/%s", owner, repo)).
+		Options(bOpts...).
+		Value(&selectedBranch).
+		Run()
+
+	return selectedBranch, err
 }
