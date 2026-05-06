@@ -125,11 +125,10 @@ func RunSettings(path string, runFilePicker func() string, runTemplateManager fu
 			os.Getenv("SHEETS_ID"), os.Getenv("DIVISI"), os.Getenv("DEVELOPER_NAME"),
 			os.Getenv("GOOGLE_CREDENTIALS_PATH"))
 		
-		h, _ := os.UserHomeDir()
-		encKey := config.GetEncryptionKey(h)
-		encContent := config.Encrypt([]byte(content), encKey)
-		
-		_ = os.WriteFile(path, []byte(encContent), 0600)
-		fmt.Println(color.GreenString("✅ Saved!"))
+		if err := config.SaveEnv(path, content); err != nil {
+			fmt.Println(color.RedString("❌ Failed to save: %v", err))
+		} else {
+			fmt.Println(color.GreenString("✅ Saved!"))
+		}
 	}
 }

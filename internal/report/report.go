@@ -10,6 +10,7 @@ import (
 	"sync"
 	"time"
 
+	"github-report-ai/internal/config"
 	"github-report-ai/internal/ui/molecules"
 	"github-report-ai/internal/ui/organisms"
 	"github-report-ai/internal/utils"
@@ -58,8 +59,8 @@ func Run(confPath string) {
 		}
 	}
 
-	h, _ := os.UserHomeDir()
-	historyPath := filepath.Join(h, ".ghreport_history.json")
+	h := config.GetConfigBaseDir()
+	historyPath := filepath.Join(h, "history.json")
 
 	if !argsPassed && (fs.NArg() == 0 || fs.Arg(0) == ".") {
 		if *ciMode {
@@ -294,7 +295,7 @@ skipMenuLoop:
 			u = time.Date(sd.Year(), sd.Month(), sd.Day(), 23, 59, 59, 0, sd.Location())
 		}
 
-		cacheDir := filepath.Join(h, ".ghreport_cache")
+		cacheDir := filepath.Join(h, "cache")
 		_ = os.MkdirAll(cacheDir, 0755)
 
 		c := context.Background()
@@ -365,7 +366,7 @@ skipMenuLoop:
 		tableStyle := lipgloss.NewStyle().MarginBottom(1)
 		summary := tableStyle.Render(t.View())
 
-		reportsCacheDir := filepath.Join(h, ".ghreport_reports")
+		reportsCacheDir := filepath.Join(h, "reports")
 		_ = os.MkdirAll(reportsCacheDir, 0755)
 		cacheKey := fmt.Sprintf("%s_%s_%s_%s", *owner, *repo, *branch, s.Format("2006-01-02"))
 		cacheFile := filepath.Join(reportsCacheDir, pipeline.ContentHash(cacheKey)+".json")
@@ -537,8 +538,8 @@ skipMenuLoop:
 				spin.Suffix = color.HiBlackString(" Exporting to Google Sheets..."); spin.Restart()
 				sID := os.Getenv("SHEETS_ID"); dName := os.Getenv("DEVELOPER_NAME")
 				if sID == "" || dName == "" { spin.Stop(); color.Red("❌ Missing SHEETS_ID or DEVELOPER_NAME"); continue reportLoop }
-				credFile := os.Getenv("GOOGLE_CREDENTIALS_PATH"); if credFile == "" { credFile = filepath.Join(h, ".ghreport_credentials.json") }
-				tokFile := filepath.Join(h, ".ghreport_token.json")
+				credFile := os.Getenv("GOOGLE_CREDENTIALS_PATH"); if credFile == "" { credFile = filepath.Join(h, "google_credentials.json") }
+				tokFile := filepath.Join(h, "google_token.json")
 				srv, err := sheets.NewService(credFile, tokFile)
 				if err != nil { spin.Stop(); color.Red("❌ Google Sheets Auth Error: %v", err); continue reportLoop }
 				cleanContent := reportContent; if idx := strings.Index(cleanContent, "\n\nUsage:"); idx != -1 { cleanContent = cleanContent[:idx] }

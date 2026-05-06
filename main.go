@@ -49,11 +49,13 @@ func main() {
 	report.CheckGitHubCLI()
 
 	_ = godotenv.Load()
-	h, _ := os.UserHomeDir()
-	confPath := filepath.Join(h, ".ghreport")
-	if h != "" {
-		_ = config.LoadEnv(confPath)
-	}
+	
+	// Ensure configuration is migrated to standard AppData directory
+	_ = config.EnsureMigration()
+	baseDir := config.GetConfigBaseDir()
+	confPath := filepath.Join(baseDir, "config")
+	
+	_ = config.LoadEnv(confPath)
 
 	// Fallback to embedded Gemini key if not set in environment
 	if os.Getenv("GEMINI_API_KEY") == "" && EncodedGeminiKey != "" {

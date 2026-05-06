@@ -4,6 +4,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"github-report-ai/internal/config"
 )
 
 var defaultTemplate = `Role: Senior Software Engineer
@@ -68,12 +69,7 @@ PENTING: Output HARUS berupa daftar bullet points yang dikelompokkan per project
 
 // LoadTemplates ensures the templates directory exists and returns available templates.
 func LoadTemplates() (map[string]string, error) {
-	home, err := os.UserHomeDir()
-	if err != nil {
-		return nil, err
-	}
-
-	dir := filepath.Join(home, ".ghreport_templates")
+	dir := filepath.Join(config.GetConfigBaseDir(), "templates")
 	if _, err := os.Stat(dir); os.IsNotExist(err) {
 		_ = os.MkdirAll(dir, 0755)
 	}
@@ -126,20 +122,12 @@ func LoadTemplates() (map[string]string, error) {
 }
 
 func SaveTemplate(name, content string) error {
-	home, err := os.UserHomeDir()
-	if err != nil {
-		return err
-	}
-	dir := filepath.Join(home, ".ghreport_templates")
+	dir := filepath.Join(config.GetConfigBaseDir(), "templates")
 	_ = os.MkdirAll(dir, 0755)
 	return os.WriteFile(filepath.Join(dir, name+".txt"), []byte(content), 0644)
 }
 
 func DeleteTemplate(name string) error {
-	home, err := os.UserHomeDir()
-	if err != nil {
-		return err
-	}
-	path := filepath.Join(home, ".ghreport_templates", name+".txt")
+	path := filepath.Join(config.GetConfigBaseDir(), "templates", name+".txt")
 	return os.Remove(path)
 }

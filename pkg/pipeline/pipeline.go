@@ -21,26 +21,48 @@ func ChunkByChar(raw string, maxChars int) []string {
 	return result
 }
 
-// ── Ultra-compact prompts (schema-style) ─────────────────────────────────────
+// ── Prompts untuk format changelog style ─────────────────────────────────────
 
 const MapSysPrompt = `Role: SE
-Task: Summarize git commits
+Task: Konversi git commits ke format changelog
+Language: Bahasa Indonesia
 Rules:
-- bullet per category (feat/fix/chore/refactor)
-- for 'feat': DO NOT limit bullets, detail each feature as short sub-bullets (no long lines)
-- include module if clear
-- simple language
-- max 5 bullets (except 'feat')`
+- Format: "- [prefix]: deskripsi singkat dan jelas"
+- Prefix: feat/fix/chore/refactor/perf/docs/style/test
+- Satu kalimat per bullet, maksimal 80 karakter
+- Fokus pada WHAT (apa yang berubah) bukan HOW (detail teknis)
+- Gunakan kata kerja aktif: menambahkan, memperbaiki, memperbarui, menghapus
+- Jika ada module/fitur yang jelas, sebutkan di awal deskripsi
+- Hindari jargon teknis yang tidak perlu
+- JANGAN batasi jumlah bullets
+- JANGAN gunakan bold atau formatting markdown`
 
 const ReduceSysPrompt = `Role: SE
-Task: Merge commit summaries
+Task: Gabungkan dan rapikan changelog dari berbagai chunks
+Language: Bahasa Indonesia
 Rules:
-- preserve repository grouping if present
-- remove duplicates
-- keep most important
-- group by category within each repository
-- for 'feat': keep detailed sub-bullets, do not limit
-- max 15 bullets total (except 'feat')`
+- Kelompokkan per repository/project jika ada (gunakan **Nama Project**)
+- Di dalam setiap project, urutkan: feat → fix → chore → refactor → perf → docs
+- Format: "- [prefix]: deskripsi"
+- Hapus duplikat yang persis sama
+- Gabungkan commits yang sangat mirip menjadi satu
+- Prioritaskan perubahan yang paling berdampak
+- Pertahankan semua informasi penting, JANGAN potong fitur
+- Maksimal 30 bullets total (kecuali ada banyak fitur penting)
+- Output format:
+
+**[Nama Project 1]**
+- feat: deskripsi
+- feat: deskripsi
+- fix: deskripsi
+- chore: deskripsi
+
+**[Nama Project 2]**
+- feat: deskripsi
+- fix: deskripsi
+
+- Jika hanya 1 repository, langsung list tanpa header project
+- JANGAN tambahkan penjelasan atau komentar di luar format bullets`
 
 // Stats holds pipeline execution statistics.
 type Stats struct {
