@@ -145,8 +145,10 @@ func Run(confPath string) {
 						if len(p) >= 2 {
 							ownerVal, repoVal := p[len(p)-2], p[len(p)-1]
 							
-							selectedBranch, _ := fetchAndSelectBranch(context.Background(), *tok, ownerVal, repoVal)
-							batchRepos = append(batchRepos, repoInfo{Owner: ownerVal, Repo: repoVal, Branch: selectedBranch})
+							selectedBranches, _ := fetchAndSelectBranches(context.Background(), *tok, ownerVal, repoVal, nil)
+							for _, b := range selectedBranches {
+								batchRepos = append(batchRepos, repoInfo{Owner: ownerVal, Repo: repoVal, Branch: b})
+							}
 						}
 					}
 					*owner = batchRepos[0].Owner
@@ -203,15 +205,19 @@ func Run(confPath string) {
 				*owner = parts[len(parts)-2]
 				*repo = parts[len(parts)-1]
 				
-				selectedBranch := ""
-				// Only ask for branch if NOT Current Directory
-				if selected != fmt.Sprintf("%s/%s", localOwner, localRepo) {
-					selectedBranch, _ = fetchAndSelectBranch(context.Background(), *tok, *owner, *repo)
+				currentBranch := ""
+				if selected == fmt.Sprintf("%s/%s", localOwner, localRepo) {
+					currentBranch = utils.Sh("git", "rev-parse", "--abbrev-ref", "HEAD")
 				}
-				
-				batchRepos = []repoInfo{{Owner: *owner, Repo: *repo, Branch: selectedBranch}}
-				if selectedBranch != "" {
-					*branch = selectedBranch
+
+				selectedBranches, _ := fetchAndSelectBranches(context.Background(), *tok, *owner, *repo, []string{currentBranch})
+
+				batchRepos = nil
+				for _, b := range selectedBranches {
+					batchRepos = append(batchRepos, repoInfo{Owner: *owner, Repo: *repo, Branch: b})
+				}
+				if len(selectedBranches) > 0 {
+					*branch = selectedBranches[0]
 				}
 			}
 			break
@@ -505,7 +511,7 @@ skipMenuLoop:
 						tmpl := templates[fr]; if tmpl == "" { tmpl = templates["Default"] }
 						sp := strings.ReplaceAll(tmpl, "{{FOCUS}}", fr); sp = strings.ReplaceAll(sp, "{{CONTEXT}}", ctxN)
 						report, _ := fb(mm, sp, merged)
-						finalReports[idx] = fmt.Sprintf("## REPOSITORY: %s/%s\n\n%s", batchRepos[idx].Owner, batchRepos[idx].Repo, report)
+						finalReports[idx] = fmt.Sprintf("## REPOSITORY: %s/%s (%s)\n\n%s", batchRepos[idx].Owner, batchRepos[idx].Repo, batchRepos[idx].Branch, report)
 					}(i)
 				}
 				wg.Wait(); _ = cc.Flush(); spin.Stop()
@@ -569,7 +575,7 @@ skipMenuLoop:
 		}
 	}
 }
-func fetchAndSelectBranch(ctx context.Context, tok, owner, repo string) (string, error) {
+func fetchAndSelectBranches(ctx context.Context, tok, owner, repo string, defaultBranches []string) ([]string, error) {
 	spin := spinner.New(spinner.CharSets[14], 100*time.Millisecond)
 	spin.Suffix = color.HiBlackString(" Fetching branches for %s/%s...", owner, repo)
 	spin.Start()
@@ -581,23 +587,36 @@ func fetchAndSelectBranch(ctx context.Context, tok, owner, repo string) (string,
 	spin.Stop()
 
 	if bErr != nil || len(branches) == 0 {
-		return "", bErr
+		return nil, bErr
 	}
 
 	if len(branches) == 1 {
-		return branches[0], nil
+		return []string{branches[0]}, nil
 	}
 
-	var selectedBranch string
+	var selectedBranches []string
+	if len(defaultBranches) > 0 {
+		// Filter default branches to only those that actually exist in the remote
+		for _, db := range defaultBranches {
+			for _, rb := range branches {
+				if db == rb {
+					selectedBranches = append(selectedBranches, db)
+					break
+				}
+			}
+		}
+	}
+
 	var bOpts []huh.Option[string]
 	for _, brName := range branches {
 		bOpts = append(bOpts, huh.NewOption(brName, brName))
 	}
-	err := huh.NewSelect[string]().
-		Title(fmt.Sprintf("Select Branch for %s/%s", owner, repo)).
+	err := huh.NewMultiSelect[string]().
+		Title(fmt.Sprintf("Select Branches for %s/%s", owner, repo)).
+		Description("Select one or more branches to include in the report").
 		Options(bOpts...).
-		Value(&selectedBranch).
+		Value(&selectedBranches).
 		Run()
 
-	return selectedBranch, err
+	return selectedBranches, err
 }
