@@ -172,6 +172,20 @@ func (c *Client) GetReportData(ctx context.Context, owner, repo, branch string, 
 
 	return sb.String(), stats, nil
 }
+func (c *Client) ListBranches(ctx context.Context, owner, repo string) ([]string, error) {
+	branches, _, err := c.client.Repositories.ListBranches(ctx, owner, repo, &github.BranchListOptions{
+		ListOptions: github.ListOptions{PerPage: 100},
+	})
+	if err != nil {
+		return nil, err
+	}
+	var branchNames []string
+	for _, b := range branches {
+		branchNames = append(branchNames, b.GetName())
+	}
+	return branchNames, nil
+}
+
 func (c *Client) GetUserLogin(ctx context.Context) (string, error) {
 	u, _, err := c.client.Users.Get(ctx, "")
 	if err != nil {

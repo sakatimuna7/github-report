@@ -41,7 +41,8 @@ func Run(confPath string) {
 	periodFlag := fs.String("period", "today", "Date period (e.g. 02/01/2006 or 'today')")
 	focusFlag := fs.String("focus", "1. Semua", "Focus area")
 	
-	var batchRepos []struct{ Owner, Repo string }
+	type repoInfo struct{ Owner, Repo, Branch string }
+	var batchRepos []repoInfo
 	_ = fs.Parse(os.Args[1:])
 
 	argsPassed := *owner != "" && *repo != ""
@@ -142,7 +143,31 @@ func Run(confPath string) {
 					for _, b := range batchSelected {
 						p := strings.Split(b, "/")
 						if len(p) >= 2 {
-							batchRepos = append(batchRepos, struct{ Owner, Repo string }{p[0], p[1]})
+							ownerVal, repoVal := p[len(p)-2], p[len(p)-1]
+							
+							// Fetch branches for this repo
+							spin := spinner.New(spinner.CharSets[14], 100*time.Millisecond)
+							spin.Suffix = color.HiBlackString(" Fetching branches for %s/%s...", ownerVal, repoVal)
+							spin.Start()
+							
+							if *tok == "" { *tok = utils.Sh("gh", "auth", "token") }
+							branches, bErr := github.NewClient(*tok).ListBranches(context.Background(), ownerVal, repoVal)
+							spin.Stop()
+							
+							selectedBranch := ""
+							if bErr == nil && len(branches) > 0 {
+								var bOpts []huh.Option[string]
+								for _, brName := range branches {
+									bOpts = append(bOpts, huh.NewOption(brName, brName))
+								}
+								err = huh.NewSelect[string]().
+									Title(fmt.Sprintf("Select Branch for %s/%s", ownerVal, repoVal)).
+									Options(bOpts...).
+									Value(&selectedBranch).
+									Run()
+							}
+							
+							batchRepos = append(batchRepos, repoInfo{Owner: ownerVal, Repo: repoVal, Branch: selectedBranch})
 						}
 					}
 					*owner = batchRepos[0].Owner
@@ -198,14 +223,14 @@ func Run(confPath string) {
 			if len(parts) >= 2 {
 				*owner = parts[len(parts)-2]
 				*repo = parts[len(parts)-1]
-				batchRepos = []struct{ Owner, Repo string }{{*owner, *repo}}
+				batchRepos = []repoInfo{{*owner, *repo, ""}}
 			}
 			break
 		}
 	} else if *owner == "" || *repo == "" {
 		if *owner == "" { *owner = localOwner }
 		if *repo == "" { *repo = localRepo }
-		batchRepos = []struct{ Owner, Repo string }{{*owner, *repo}}
+		batchRepos = []repoInfo{{*owner, *repo, ""}}
 	}
 skipMenuLoop:
 	
@@ -303,8 +328,11 @@ skipMenuLoop:
 		_ = spin.Color("cyan", "bold")
 
 		repoKey := ""
-		for _, br := range batchRepos { repoKey += br.Owner + "/" + br.Repo + "+" }
-		cc := pipeline.NewFileCache(filepath.Join(cacheDir, pipeline.ContentHash(repoKey+*branch+s.Format("2006-01-02"))+"_chunks.json"))
+		for _, br := range batchRepos {
+			b := br.Branch; if b == "" { b = *branch }
+			repoKey += br.Owner + "/" + br.Repo + "@" + b + "+"
+		}
+		cc := pipeline.NewFileCache(filepath.Join(cacheDir, pipeline.ContentHash(repoKey+s.Format("2006-01-02"))+"_chunks.json"))
 
 		var allRaw []string
 		var totalStats github.CommitStats
@@ -316,7 +344,9 @@ skipMenuLoop:
 		if s := os.Getenv("WORK_END"); s != "" { fmt.Sscanf(s, "%d", &we) }
 
 		for _, br := range batchRepos {
-			raw, stats, err := github.NewClient(*tok).GetReportData(c, br.Owner, br.Repo, *branch, *lim, s, u, ws, we)
+			targetBranch := br.Branch
+			if targetBranch == "" { targetBranch = *branch }
+			raw, stats, err := github.NewClient(*tok).GetReportData(c, br.Owner, br.Repo, targetBranch, *lim, s, u, ws, we)
 			if err == nil {
 				allRaw = append(allRaw, fmt.Sprintf("=== REPOSITORY: %s/%s ===\n%s", br.Owner, br.Repo, raw))
 				totalStats.Total += stats.Total
