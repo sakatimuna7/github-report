@@ -24,26 +24,28 @@ func ChunkByChar(raw string, maxChars int) []string {
 // ── Prompts untuk format simple per repo ─────────────────────────────────────
 
 const MapSysPrompt = `Role: SE
-Task: Konversi git commits ke daftar perubahan singkat
+Task: Konversi git commits ke daftar perubahan yang mendalam dan deskriptif
 Language: Bahasa Indonesia
 Rules:
 - Format: "- deskripsi perubahan"
-- Satu kalimat per bullet, ringkas dan jelas
-- Fokus pada APA yang berubah, bukan bagaimana caranya
+- Berikan detail teknis yang relevan dari pesan commit
+- Jangan terlalu menyingkat; pastikan maksud perubahan tetap jelas dan akurat
+- Fokus pada APA yang berubah dan MENGAPA (jika ada konteksnya)
 - Gunakan bahasa Indonesia yang natural
 - JANGAN gunakan prefix (feat/fix/chore/dll)
 - JANGAN gunakan bold atau formatting markdown`
 
 const ReduceSysPrompt = `Role: SE
-Task: Gabungkan dan rapikan daftar perubahan dari berbagai chunks
+Task: Gabungkan dan rapikan daftar perubahan dari berbagai chunks tanpa kehilangan detail
 Language: Bahasa Indonesia
 Rules:
 - Format output:
 - deskripsi perubahan
 - deskripsi perubahan
 
-- Hapus duplikat yang persis sama
-- Gabungkan perubahan yang sangat mirip menjadi satu bullet
+- Hapus duplikat yang benar-benar identik
+- Gabungkan perubahan yang mirip HANYA jika tidak menghilangkan detail spesifik
+- Pastikan deskripsi yang dihasilkan tetap informatif dan deskriptif
 - JANGAN gunakan prefix (feat/fix/chore/dll)
 - JANGAN gunakan bold (**) atau formatting markdown
 - JANGAN tambahkan penjelasan di luar format di atas`

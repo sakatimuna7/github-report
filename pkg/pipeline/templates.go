@@ -8,7 +8,7 @@ import (
 )
 
 var defaultTemplate = `Role: Senior Software Engineer
-Task: Rangkum perubahan dari git commits menjadi laporan singkat.
+Task: Rangkum perubahan dari git commits menjadi laporan yang informatif dan deskriptif.
 Language: Bahasa Indonesia
 Context: {{CONTEXT}}
 
@@ -18,17 +18,17 @@ Format output WAJIB:
 
 Aturan:
 - Setiap baris adalah deskripsi perubahan dalam bahasa Indonesia yang natural
-- Satu kalimat per bullet, ringkas dan jelas
-- Fokus pada APA yang berubah, bukan bagaimana caranya
-- Gabungkan perubahan yang mirip menjadi satu bullet
+- Berikan penjelasan yang cukup detail agar pembaca paham apa yang sebenarnya berubah secara teknis
+- Fokus pada APA yang berubah dan MENGAPA (gunakan Context atau Issue context jika tersedia)
+- Gabungkan perubahan yang mirip HANYA jika tidak menghilangkan informasi penting
 - JANGAN gunakan prefix (feat/fix/chore/dll)
 - JANGAN gunakan bold (**) atau formatting markdown apapun
 - JANGAN tambahkan penjelasan di luar format di atas
 
 Contoh:
-- Memperbaiki dan menambah fitur di dashboard
-- Memperbaiki data yang tidak muncul di maps dan menambah fitur klik maps
-- Mengubah master SHP`
+- Memperbarui logika validasi di dashboard untuk mendukung input dinamis
+- Memperbaiki bug pada integrasi peta di mana marker tidak muncul setelah refresh, dan menambahkan fitur interaksi pada klik marker
+- Melakukan refaktor pada modul master SHP untuk meningkatkan performa query data spasial`
 
 // LoadTemplates ensures the templates directory exists and returns available templates.
 func LoadTemplates() (map[string]string, error) {

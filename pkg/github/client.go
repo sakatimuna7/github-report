@@ -132,8 +132,8 @@ func (c *Client) GetReportData(ctx context.Context, owner, repo, branch string, 
 			stats.Overtime++
 		}
 
-		// Only take the first line of the commit message (subject)
-		shortMsg := strings.Split(fullMsg, "\n")[0]
+		// Use full message instead of just the subject line
+		msg := strings.ReplaceAll(fullMsg, "\n", " ")
 		
 		author := commit.GetCommit().GetAuthor().GetName()
 		// Format date to YYYY-MM-DD
@@ -145,7 +145,7 @@ func (c *Client) GetReportData(ctx context.Context, owner, repo, branch string, 
 		}
 		
 		// Enrich message with issue titles if found
-		enrichedMsg := shortMsg
+		enrichedMsg := msg
 		matches := issueRegex.FindAllStringSubmatch(fullMsg, -1)
 		for _, m := range matches {
 			if len(m) > 1 {
@@ -162,8 +162,8 @@ func (c *Client) GetReportData(ctx context.Context, owner, repo, branch string, 
 		sb.WriteString("\n\n[Deep Context: Referenced Issues & PRs]\n")
 		for id, issue := range issueMap {
 			body := issue.GetBody()
-			if len(body) > 300 {
-				body = body[:300] + "..."
+			if len(body) > 1000 {
+				body = body[:1000] + "..."
 			}
 			body = strings.ReplaceAll(body, "\n", " ")
 			sb.WriteString(fmt.Sprintf("- #%s [%s]: %s\n  Summary: %s\n", id, issue.GetState(), issue.GetTitle(), body))
