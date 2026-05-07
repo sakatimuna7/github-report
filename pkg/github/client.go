@@ -37,7 +37,7 @@ type CommitStats struct {
 	Overtime  int
 }
 
-func (c *Client) GetReportData(ctx context.Context, owner, repo, branch string, limit int, since, until time.Time, workStart, workEnd int) (string, CommitStats, error) {
+func (c *Client) GetReportData(ctx context.Context, owner, repo, branch string, limit int, since, until time.Time, workStart, workEnd int) (string, CommitStats, []*github.RepositoryCommit, error) {
 	var allCommits []*github.RepositoryCommit
 	
 	opts := &github.CommitsListOptions{
@@ -62,7 +62,7 @@ func (c *Client) GetReportData(ctx context.Context, owner, repo, branch string, 
 				opts.SHA = ""
 				continue
 			}
-			return "", CommitStats{}, fmt.Errorf("error fetching commits: %w", err)
+			return "", CommitStats{}, nil, fmt.Errorf("error fetching commits: %w", err)
 		}
 		
 		allCommits = append(allCommits, commits...)
@@ -170,7 +170,25 @@ func (c *Client) GetReportData(ctx context.Context, owner, repo, branch string, 
 		}
 	}
 
-	return sb.String(), stats, nil
+	return sb.String(), stats, allCommits, nil
+}
+
+// GetCommitPatch fetches the actual diff/patch for a specific commit SHA.
+func (c *Client) GetCommitPatch(ctx context.Context, owner, repo, sha string) (string, error) {
+	commit, _, err := c.client.Repositories.GetCommit(ctx, owner, repo, sha, &github.ListOptions{})
+	if err != nil {
+		return "", err
+	}
+
+	var sb strings.Builder
+	for _, f := range commit.Files {
+		if f.GetPatch() != "" {
+			sb.WriteString(fmt.Sprintf("diff --git a/%s b/%s\n", f.GetFilename(), f.GetFilename()))
+			sb.WriteString(f.GetPatch())
+			sb.WriteString("\n")
+		}
+	}
+	return sb.String(), nil
 }
 func (c *Client) ListBranches(ctx context.Context, owner, repo string) ([]string, error) {
 	branches, _, err := c.client.Repositories.ListBranches(ctx, owner, repo, &github.BranchListOptions{

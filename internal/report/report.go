@@ -25,6 +25,7 @@ import (
 	"github.com/charmbracelet/huh"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/fatih/color"
+	ghLib "github.com/google/go-github/v62/github"
 )
 
 func Run(confPath string) {
@@ -330,8 +331,9 @@ skipMenuLoop:
 		cc := pipeline.NewFileCache(filepath.Join(cacheDir, pipeline.ContentHash(repoKey+s.Format("2006-01-02"))+"_chunks.json"))
 
 		var allRaw []string
+		var allCommitsList [][]*ghLib.RepositoryCommit
 		var totalStats github.CommitStats
-		spin.Suffix = color.HiBlackString(" Fetching GitHub Data...")
+		spin.Suffix = color.HiBlackString(" Phase 1/4: 📡 Fetching GitHub Data...")
 		spin.Start()
 		
 		ws, we := 9, 17
@@ -341,9 +343,10 @@ skipMenuLoop:
 		for _, br := range batchRepos {
 			targetBranch := br.Branch
 			if targetBranch == "" { targetBranch = *branch }
-			raw, stats, err := github.NewClient(*tok).GetReportData(c, br.Owner, br.Repo, targetBranch, *lim, s, u, ws, we)
+			raw, stats, commits, err := github.NewClient(*tok).GetReportData(c, br.Owner, br.Repo, targetBranch, *lim, s, u, ws, we)
 			if err == nil {
 				allRaw = append(allRaw, fmt.Sprintf("=== REPOSITORY: %s/%s ===\n%s", br.Owner, br.Repo, raw))
+				allCommitsList = append(allCommitsList, commits)
 				totalStats.Total += stats.Total
 				totalStats.Features += stats.Features
 				totalStats.Fixes += stats.Fixes
@@ -482,40 +485,148 @@ skipMenuLoop:
 					return res, err
 				}
 
+				// fbDiff: strictly only gemini models — groq-llama hallucinates on code diffs
+				fbDiff := func(sp, d string) (string, error) {
+					for _, m := range []string{"gemini-flash", "gemini-flash-lite"} {
+						if res, err := call(m, sp, d); err == nil && res != "" { return res, nil }
+					}
+					return "", fmt.Errorf("fail")
+				}
+				// fb: general fallback including groq, for non-code tasks
 				fb := func(pref, sp, d string) (string, error) {
-					if res, err := call(pref, sp, d); err == nil { return res, nil }
+					if res, err := call(pref, sp, d); err == nil && res != "" { return res, nil }
 					for _, m := range []string{"gemini-flash", "gemini-flash-lite", "groq-llama"} {
-						if m != pref { if res, err := call(m, sp, d); err == nil { return res, nil } }
+						if m != pref { if res, err := call(m, sp, d); err == nil && res != "" { return res, nil } }
 					}
 					return "", fmt.Errorf("fail")
 				}
 
 				finalReports := make([]string, len(allRaw))
 				var wg sync.WaitGroup
-				spin.Suffix = color.HiBlackString(fmt.Sprintf(" Analyzing %d repositories in parallel...", len(allRaw)))
+				spin.Suffix = color.HiBlackString(fmt.Sprintf(" Phase 2/4: \U0001f50d Starting deep analysis for %d repos...", len(allRaw)))
 				spin.Restart()
 
 				for i := range allRaw {
 					wg.Add(1)
 					go func(idx int) {
 						defer wg.Done()
-						dedup, _, _, _ := pipeline.DeduplicateCommits(allRaw[idx])
-						chunks := pipeline.ChunkByChar(dedup, 2500)
-						pool := pipeline.NewWorkerPool(5, cc)
+						br := batchRepos[idx]
 						mm, rm := "gemini-flash-lite", "gemini-flash"
 						if strings.HasPrefix(*mod, "groq") { mm, rm = "groq-llama", "groq-mixtral" }
-						mRes := pool.Run(c, chunks, func(ctx context.Context, d string) (string, error) { return fb(mm, pipeline.MapSysPrompt, d) })
-						sums, _ := pipeline.CollectSuccessful(mRes)
-						merged, _ := fb(rm, pipeline.ReduceSysPrompt, strings.Join(sums, "\n---\n"))
-						templates, _ := pipeline.LoadTemplates()
-						tmpl := templates[fr]; if tmpl == "" { tmpl = templates["Default"] }
-						sp := strings.ReplaceAll(tmpl, "{{FOCUS}}", fr); sp = strings.ReplaceAll(sp, "{{CONTEXT}}", ctxN)
-						report, _ := fb(mm, sp, merged)
-						
-						// --- Mini Workflow: Verify & Polish Step ---
-						report, _ = fb(mm, pipeline.VerifySysPrompt, report)
 
-						finalReports[idx] = fmt.Sprintf("%s/%s (%s)\n%s", batchRepos[idx].Owner, batchRepos[idx].Repo, batchRepos[idx].Branch, report)
+						var commitSummaries []string
+
+						// --- Phase 2/4: Deep Diff Analysis per-commit ---
+						if idx < len(allCommitsList) && len(allCommitsList[idx]) > 0 {
+							commits := allCommitsList[idx]
+							gh := github.NewClient(*tok)
+							startTime := time.Now()
+
+							for j, cm := range commits {
+								sha := cm.GetSHA()
+								if sha == "" { continue }
+								shortSHA := sha
+								if len(sha) > 7 { shortSHA = sha[:7] }
+
+								// Time estimate
+								elapsed := time.Since(startTime)
+								var estRemain string
+								if j > 0 {
+									avg := elapsed / time.Duration(j)
+									remaining := avg * time.Duration(len(commits)-j)
+									estRemain = fmt.Sprintf(" (est. ~%s)", remaining.Round(time.Second))
+								}
+
+								mu.Lock()
+								spin.Suffix = color.HiBlackString(fmt.Sprintf(" Phase 2/4: 🔍 Deep Analysis [%d/%d] %s%s", j+1, len(commits), shortSHA, estRemain))
+								mu.Unlock()
+
+								// Check cache first
+								summaryKey := pipeline.ContentHash(fmt.Sprintf("diff-v2:%s/%s:%s", br.Owner, br.Repo, sha))
+								if cached, ok := cc.Get(summaryKey); ok && len(cached) > 15 {
+									commitSummaries = append(commitSummaries, cached)
+									continue
+								}
+
+								// Fetch diff
+								patch, _ := gh.GetCommitPatch(c, br.Owner, br.Repo, sha)
+
+								var summary string
+								if patch != "" {
+									optimized := pipeline.CavemanDiff(patch)
+									if optimized != "" {
+										// Bug #2 fix: plain text, no ToonEncode in COMMIT_MESSAGE
+										rawMsg := strings.TrimSpace(cm.GetCommit().GetMessage())
+										rawMsg = strings.ReplaceAll(rawMsg, "\n", " ")
+
+										// Split large diffs
+										diffParts := pipeline.SplitDiffByFile(optimized, 3000)
+
+										if len(diffParts) <= 1 {
+											input := fmt.Sprintf("COMMIT_MESSAGE: %s\nDIFF:\n%s", rawMsg, optimized)
+											summary, _ = fbDiff(pipeline.DiffAnalyzeSysPrompt, input)
+										} else {
+											// Bug #2 fix: plain text for split parts too
+											var partSummaries []string
+											for _, part := range diffParts {
+												input := fmt.Sprintf("COMMIT_MESSAGE: %s\nDIFF:\n%s", rawMsg, part)
+												ps, err := fbDiff(pipeline.DiffAnalyzeSysPrompt, input)
+												if err == nil && ps != "" {
+													partSummaries = append(partSummaries, ps)
+												}
+											}
+											if len(partSummaries) > 0 {
+												summary = strings.Join(partSummaries, "\n")
+											}
+										}
+									}
+								}
+
+								// Fallback to commit message if diff analysis failed
+								if summary == "" {
+									msg := cm.GetCommit().GetMessage()
+									summary = "- " + strings.ReplaceAll(msg, "\n", " ")
+								}
+
+								// Cache valid summary
+								if len(summary) > 15 {
+									cc.Set(summaryKey, summary)
+								}
+								commitSummaries = append(commitSummaries, summary)
+							}
+						}
+
+						// --- Phase 3/4: Generate Report ---
+						mu.Lock()
+						spin.Suffix = color.HiBlackString(fmt.Sprintf(" Phase 3/4: 📝 Generating report for %s/%s...", br.Owner, br.Repo))
+						mu.Unlock()
+
+						var report string
+						if len(commitSummaries) > 0 {
+							// Bug #4 fix: reduced summaries go directly to verify — no template re-apply
+							// Template would re-interpret already-summarized data and cause hallucinations
+							report, _ = fb(rm, pipeline.ReduceSysPrompt, strings.Join(commitSummaries, "\n---\n"))
+						} else {
+							// Fallback: original text-based pipeline (when no commits available)
+							dedup, _, _, _ := pipeline.DeduplicateCommits(allRaw[idx])
+							chunks := pipeline.ChunkByChar(dedup, 2500)
+							pool := pipeline.NewWorkerPool(5, cc)
+							mRes := pool.Run(c, chunks, func(ctx context.Context, d string) (string, error) { return fb(mm, pipeline.MapSysPrompt, d) })
+							sums, _ := pipeline.CollectSuccessful(mRes)
+							report, _ = fb(rm, pipeline.ReduceSysPrompt, strings.Join(sums, "\n---\n"))
+						}
+
+						// --- Phase 4/4: Verify & Polish ---
+						mu.Lock()
+						spin.Suffix = color.HiBlackString(fmt.Sprintf(" Phase 4/4: ✅ Verifying format for %s/%s...", br.Owner, br.Repo))
+						mu.Unlock()
+
+						verified, verErr := fb(mm, pipeline.VerifySysPrompt, report)
+						if verErr == nil && len(verified) > len(report)/2 {
+							report = verified
+						}
+
+						finalReports[idx] = fmt.Sprintf("%s/%s (%s)\n%s", br.Owner, br.Repo, br.Branch, report)
 					}(i)
 				}
 				wg.Wait(); _ = cc.Flush(); spin.Stop()
