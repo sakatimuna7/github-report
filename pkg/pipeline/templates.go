@@ -13,13 +13,10 @@ Language: Bahasa Indonesia
 Context: {{CONTEXT}}
 
 Format output WAJIB:
-
-NamaRepo/branch
 - deskripsi perubahan
 - deskripsi perubahan
 
 Aturan:
-- Gunakan nama repository dan branch sebagai header (tanpa bold/formatting)
 - Setiap baris adalah deskripsi perubahan dalam bahasa Indonesia yang natural
 - Satu kalimat per bullet, ringkas dan jelas
 - Fokus pada APA yang berubah, bukan bagaimana caranya
@@ -29,7 +26,6 @@ Aturan:
 - JANGAN tambahkan penjelasan di luar format di atas
 
 Contoh:
-simtaru/main
 - Memperbaiki dan menambah fitur di dashboard
 - Memperbaiki data yang tidak muncul di maps dan menambah fitur klik maps
 - Mengubah master SHP`

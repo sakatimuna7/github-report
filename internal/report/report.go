@@ -511,7 +511,7 @@ skipMenuLoop:
 						tmpl := templates[fr]; if tmpl == "" { tmpl = templates["Default"] }
 						sp := strings.ReplaceAll(tmpl, "{{FOCUS}}", fr); sp = strings.ReplaceAll(sp, "{{CONTEXT}}", ctxN)
 						report, _ := fb(mm, sp, merged)
-						finalReports[idx] = fmt.Sprintf("## REPOSITORY: %s/%s (%s)\n\n%s", batchRepos[idx].Owner, batchRepos[idx].Repo, batchRepos[idx].Branch, report)
+						finalReports[idx] = fmt.Sprintf("%s/%s (%s)\n%s", batchRepos[idx].Owner, batchRepos[idx].Repo, batchRepos[idx].Branch, report)
 					}(i)
 				}
 				wg.Wait(); _ = cc.Flush(); spin.Stop()

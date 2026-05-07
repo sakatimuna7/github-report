@@ -39,12 +39,9 @@ Task: Gabungkan dan rapikan daftar perubahan dari berbagai chunks
 Language: Bahasa Indonesia
 Rules:
 - Format output:
-
-NamaRepo/branch
 - deskripsi perubahan
 - deskripsi perubahan
 
-- Gunakan nama repository dan branch sebagai header (tanpa formatting)
 - Hapus duplikat yang persis sama
 - Gabungkan perubahan yang sangat mirip menjadi satu bullet
 - JANGAN gunakan prefix (feat/fix/chore/dll)
