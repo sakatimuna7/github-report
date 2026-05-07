@@ -17,13 +17,15 @@ Format output WAJIB:
 - deskripsi perubahan
 
 Aturan:
-- Setiap baris adalah deskripsi perubahan dalam bahasa Indonesia yang natural
+- Setiap baris deskripsi WAJIB dimulai dengan bullet point "-"
 - Berikan penjelasan yang cukup detail agar pembaca paham apa yang sebenarnya berubah secara teknis
 - Fokus pada APA yang berubah dan MENGAPA (gunakan Context atau Issue context jika tersedia)
 - Gabungkan perubahan yang mirip HANYA jika tidak menghilangkan informasi penting
 - JANGAN gunakan prefix (feat/fix/chore/dll)
 - JANGAN gunakan bold (**) atau formatting markdown apapun
-- JANGAN tambahkan penjelasan di luar format di atas
+- JANGAN tambahkan kalimat pembuka seperti "Berikut adalah..." atau penutup.
+- JANGAN tambahkan penjelasan di luar format bullet point di atas.
+- Output HANYA berisi daftar bullet point saja.
 
 Contoh:
 - Memperbarui logika validasi di dashboard untuk mendukung input dinamis

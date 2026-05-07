@@ -511,6 +511,10 @@ skipMenuLoop:
 						tmpl := templates[fr]; if tmpl == "" { tmpl = templates["Default"] }
 						sp := strings.ReplaceAll(tmpl, "{{FOCUS}}", fr); sp = strings.ReplaceAll(sp, "{{CONTEXT}}", ctxN)
 						report, _ := fb(mm, sp, merged)
+						
+						// --- Mini Workflow: Verify & Polish Step ---
+						report, _ = fb(mm, pipeline.VerifySysPrompt, report)
+
 						finalReports[idx] = fmt.Sprintf("%s/%s (%s)\n%s", batchRepos[idx].Owner, batchRepos[idx].Repo, batchRepos[idx].Branch, report)
 					}(i)
 				}

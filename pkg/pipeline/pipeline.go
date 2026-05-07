@@ -50,6 +50,16 @@ Rules:
 - JANGAN gunakan bold (**) atau formatting markdown
 - JANGAN tambahkan penjelasan di luar format di atas`
 
+const VerifySysPrompt = `Role: Senior Editor
+Task: Verifikasi dan rapikan format laporan agar sesuai standar ketat.
+Rules:
+- SETIAP baris deskripsi HARUS dimulai dengan bullet point "-" (minus diikuti spasi).
+- HAPUS semua kalimat pembuka seperti "Berikut adalah...", "Rangkuman perubahan...", dll.
+- HAPUS semua kalimat penutup, kesimpulan, atau basa-basi.
+- JANGAN mengubah substansi teknis, hanya rapikan formatnya.
+- JANGAN gunakan bold (**) atau formatting markdown lainnya.
+- Output HANYA berisi daftar bullet point saja.`
+
 // Stats holds pipeline execution statistics.
 type Stats struct {
 	OrigCommits   int
