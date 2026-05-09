@@ -23,8 +23,9 @@ func AuditSecurity(ctx context.Context, mod, key, data string) ([]string, error)
 	
 	if strings.HasPrefix(mod, "gemini") {
 		id := "gemini-2.5-flash"
-		if mod != "gemini-flash" {
-			id = "gemini-2.5-flash-lite"
+		switch mod {
+		case "gemini-flash-lite":  id = "gemini-2.5-flash-lite"
+		case "gemini-flash-lite3": id = "gemini-3.1-flash-lite"
 		}
 		res, _, err = ai.NewGeminiClient(key).GenerateReport(ctx, id, SecurityAuditPrompt, data)
 	} else {

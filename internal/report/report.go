@@ -28,7 +28,17 @@ import (
 	ghLib "github.com/google/go-github/v62/github"
 )
 
+// filterOut returns slice with all elements except the one matching exclude.
+func filterOut(s []string, exclude string) []string {
+	out := s[:0:0]
+	for _, v := range s {
+		if v != exclude { out = append(out, v) }
+	}
+	return out
+}
+
 func Run(confPath string) {
+
 	fs := flag.NewFlagSet("ghreport", flag.ContinueOnError)
 	owner := fs.String("owner", "", "")
 	repo := fs.String("repo", "", "")
@@ -285,10 +295,12 @@ skipMenuLoop:
 				huh.NewGroup(
 					huh.NewSelect[string]().Title("AI Model").Options(
 						huh.NewOption("gemini-2.5-flash (recommended)", "gemini-flash"),
+						huh.NewOption("gemini-3.1-flash-lite (500 RPD, fastest)", "gemini-flash-lite3"),
 						huh.NewOption("gemini-2.5-flash-lite (faster)", "gemini-flash-lite"),
-						huh.NewOption("groq-llama", "groq-llama"),
-						huh.NewOption("groq-mixtral", "groq-mixtral"),
-						huh.NewOption("groq-gpt", "groq-gpt"),
+						huh.NewOption("groq: llama-4-scout (best for code)", "groq-llama4"),
+						huh.NewOption("groq: llama-3.3-70b (powerful)", "groq-llama"),
+						huh.NewOption("groq: mixtral-8x7b", "groq-mixtral"),
+						huh.NewOption("groq: gpt-oss-120b", "groq-gpt"),
 					).Value(mod),
 					huh.NewSelect[string]().Title("Date Period").Options(dOpts...).Value(&dr),
 					huh.NewSelect[string]().Title("Template / Focus").Options(tOpts...).Value(&fr),
@@ -475,31 +487,45 @@ skipMenuLoop:
 					var use ai.Usage
 					var err error
 					if strings.HasPrefix(m, "gemini") {
-						id := "gemini-2.5-flash"; if m != "gemini-flash" { id = "gemini-2.5-flash-lite" }
+						id := "gemini-2.5-flash"
+						switch m {
+						case "gemini-flash-lite":  id = "gemini-2.5-flash-lite"
+						case "gemini-flash-lite3": id = "gemini-3.1-flash-lite"
+						}
 						res, use, err = ai.NewGeminiClient(*gm).GenerateReport(c, id, sp, d)
 					} else {
-						id := "llama-3.1-8b-instant"; if m == "groq-mixtral" { id = "mixtral-8x7b-32768" } else if m == "groq-gpt" { id = "openai/gpt-oss-20b" }
+						id := "llama-3.3-70b-versatile"
+						if m == "groq-llama4" { id = "meta-llama/llama-4-scout-17b-16e-instruct" } else if m == "groq-mixtral" { id = "mixtral-8x7b-32768" } else if m == "groq-gpt" { id = "openai/gpt-oss-120b" }
 						res, use, err = ai.NewGroqClient(*gk).GenerateReport(c, id, sp, d)
 					}
 					mu.Lock(); usage.PromptTokens += use.PromptTokens; usage.CompletionTokens += use.CompletionTokens; usage.TotalTokens += use.TotalTokens; mu.Unlock()
 					return res, err
 				}
 
-				// fbDiff: strictly only gemini models — groq-llama hallucinates on code diffs
+				// fbDiff: tries user's chosen model first, falls back to gemini for reliability
 				fbDiff := func(sp, d string) (string, error) {
 					var errs []string
-					for _, m := range []string{"gemini-flash", "gemini-flash-lite"} {
+					var diffModels []string
+					if strings.HasPrefix(*mod, "gemini") {
+						// Gemini selected: chosen model first, then other gemini variants as fallback
+						allGemini := []string{"gemini-flash", "gemini-flash-lite3", "gemini-flash-lite"}
+						diffModels = append([]string{*mod}, filterOut(allGemini, *mod)...)
+					} else {
+						// Groq selected: try groq first, all gemini variants as fallback
+						diffModels = []string{*mod, "gemini-flash", "gemini-flash-lite3", "gemini-flash-lite"}
+					}
+					for _, m := range diffModels {
 						res, err := call(m, sp, d)
 						if err == nil && res != "" { return res, nil }
 						errs = append(errs, fmt.Sprintf("%s: %v", m, err))
 					}
 					return "", fmt.Errorf("%s", strings.Join(errs, " | "))
 				}
-				// fb: general fallback including groq, for non-code tasks
+				// fb: general fallback chain
 				fb := func(pref, sp, d string) (string, error) {
 					var errs []string
 					if res, err := call(pref, sp, d); err == nil && res != "" { return res, nil } else { errs = append(errs, fmt.Sprintf("%s: %v", pref, err)) }
-					for _, m := range []string{"gemini-flash", "gemini-flash-lite", "groq-llama"} {
+					for _, m := range []string{"gemini-flash", "gemini-flash-lite3", "gemini-flash-lite", "groq-llama4", "groq-llama"} {
 						if m != pref {
 							res, err := call(m, sp, d)
 							if err == nil && res != "" { return res, nil }
@@ -520,8 +546,9 @@ skipMenuLoop:
 					go func(idx int) {
 						defer wg.Done()
 						br := batchRepos[idx]
-						mm, rm := "gemini-flash-lite", "gemini-flash"
-						if strings.HasPrefix(*mod, "groq") { mm, rm = "groq-llama", "groq-mixtral" }
+						// mm = primary model for map/verify, rm = primary for reduce
+						// Both use the user's selected model as primary
+						mm, rm := *mod, *mod
 
 						var commitSummaries []string
 
