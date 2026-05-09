@@ -284,8 +284,8 @@ skipMenuLoop:
 			form := huh.NewForm(
 				huh.NewGroup(
 					huh.NewSelect[string]().Title("AI Model").Options(
-						huh.NewOption("gemini-flash", "gemini-flash"),
-						huh.NewOption("gemini-flash-lite", "gemini-flash-lite"),
+						huh.NewOption("gemini-2.5-flash (recommended)", "gemini-flash"),
+						huh.NewOption("gemini-2.5-flash-lite (faster)", "gemini-flash-lite"),
 						huh.NewOption("groq-llama", "groq-llama"),
 						huh.NewOption("groq-mixtral", "groq-mixtral"),
 						huh.NewOption("groq-gpt", "groq-gpt"),
@@ -475,7 +475,7 @@ skipMenuLoop:
 					var use ai.Usage
 					var err error
 					if strings.HasPrefix(m, "gemini") {
-						id := "gemini-2.0-flash"; if m != "gemini-flash" { id = "gemini-2.0-flash-lite-preview-02-05" }
+						id := "gemini-2.5-flash"; if m != "gemini-flash" { id = "gemini-2.5-flash-lite" }
 						res, use, err = ai.NewGeminiClient(*gm).GenerateReport(c, id, sp, d)
 					} else {
 						id := "llama-3.1-8b-instant"; if m == "groq-mixtral" { id = "mixtral-8x7b-32768" } else if m == "groq-gpt" { id = "openai/gpt-oss-20b" }
@@ -487,22 +487,31 @@ skipMenuLoop:
 
 				// fbDiff: strictly only gemini models — groq-llama hallucinates on code diffs
 				fbDiff := func(sp, d string) (string, error) {
+					var errs []string
 					for _, m := range []string{"gemini-flash", "gemini-flash-lite"} {
-						if res, err := call(m, sp, d); err == nil && res != "" { return res, nil }
+						res, err := call(m, sp, d)
+						if err == nil && res != "" { return res, nil }
+						errs = append(errs, fmt.Sprintf("%s: %v", m, err))
 					}
-					return "", fmt.Errorf("fail")
+					return "", fmt.Errorf("%s", strings.Join(errs, " | "))
 				}
 				// fb: general fallback including groq, for non-code tasks
 				fb := func(pref, sp, d string) (string, error) {
-					if res, err := call(pref, sp, d); err == nil && res != "" { return res, nil }
+					var errs []string
+					if res, err := call(pref, sp, d); err == nil && res != "" { return res, nil } else { errs = append(errs, fmt.Sprintf("%s: %v", pref, err)) }
 					for _, m := range []string{"gemini-flash", "gemini-flash-lite", "groq-llama"} {
-						if m != pref { if res, err := call(m, sp, d); err == nil && res != "" { return res, nil } }
+						if m != pref {
+							res, err := call(m, sp, d)
+							if err == nil && res != "" { return res, nil }
+							errs = append(errs, fmt.Sprintf("%s: %v", m, err))
+						}
 					}
-					return "", fmt.Errorf("fail")
+					return "", fmt.Errorf("%s", strings.Join(errs, " | "))
 				}
 
 				finalReports := make([]string, len(allRaw))
 				var wg sync.WaitGroup
+				var diffErrs []string // collect error logs — printed after spinner stops, never exported
 				spin.Suffix = color.HiBlackString(fmt.Sprintf(" Phase 2/4: \U0001f50d Starting deep analysis for %d repos...", len(allRaw)))
 				spin.Restart()
 
@@ -542,19 +551,31 @@ skipMenuLoop:
 								mu.Unlock()
 
 								// Check cache first
-								summaryKey := pipeline.ContentHash(fmt.Sprintf("diff-v2:%s/%s:%s", br.Owner, br.Repo, sha))
+								summaryKey := pipeline.ContentHash(fmt.Sprintf("diff-v4:%s/%s:%s", br.Owner, br.Repo, sha))
 								if cached, ok := cc.Get(summaryKey); ok && len(cached) > 15 {
 									commitSummaries = append(commitSummaries, cached)
 									continue
 								}
 
 								// Fetch diff
-								patch, _ := gh.GetCommitPatch(c, br.Owner, br.Repo, sha)
+								patch, patchErr := gh.GetCommitPatch(c, br.Owner, br.Repo, sha)
 
 								var summary string
-								if patch != "" {
+								if patchErr != nil {
+									mu.Lock()
+									diffErrs = append(diffErrs, fmt.Sprintf("  ⚠️  [%s] patch fetch error: %v", shortSHA, patchErr))
+									mu.Unlock()
+								} else if patch == "" {
+									mu.Lock()
+									diffErrs = append(diffErrs, fmt.Sprintf("  ⚠️  [%s] no patch returned (merge/empty commit)", shortSHA))
+									mu.Unlock()
+								} else {
 									optimized := pipeline.CavemanDiff(patch)
-									if optimized != "" {
+									if optimized == "" {
+										mu.Lock()
+										diffErrs = append(diffErrs, fmt.Sprintf("  ⚠️  [%s] CavemanDiff empty (non-informative diff)", shortSHA))
+										mu.Unlock()
+									} else {
 										// Bug #2 fix: plain text, no ToonEncode in COMMIT_MESSAGE
 										rawMsg := strings.TrimSpace(cm.GetCommit().GetMessage())
 										rawMsg = strings.ReplaceAll(rawMsg, "\n", " ")
@@ -564,14 +585,24 @@ skipMenuLoop:
 
 										if len(diffParts) <= 1 {
 											input := fmt.Sprintf("COMMIT_MESSAGE: %s\nDIFF:\n%s", rawMsg, optimized)
-											summary, _ = fbDiff(pipeline.DiffAnalyzeSysPrompt, input)
+											var aiErr error
+											summary, aiErr = fbDiff(pipeline.DiffAnalyzeSysPrompt, input)
+											if aiErr != nil || summary == "" {
+												mu.Lock()
+												diffErrs = append(diffErrs, fmt.Sprintf("  ⚠️  [%s] AI diff analysis failed: %v", shortSHA, aiErr))
+												mu.Unlock()
+											}
 										} else {
 											// Bug #2 fix: plain text for split parts too
 											var partSummaries []string
-											for _, part := range diffParts {
+											for pi, part := range diffParts {
 												input := fmt.Sprintf("COMMIT_MESSAGE: %s\nDIFF:\n%s", rawMsg, part)
-												ps, err := fbDiff(pipeline.DiffAnalyzeSysPrompt, input)
-												if err == nil && ps != "" {
+												ps, partErr := fbDiff(pipeline.DiffAnalyzeSysPrompt, input)
+												if partErr != nil || ps == "" {
+													mu.Lock()
+													diffErrs = append(diffErrs, fmt.Sprintf("  ⚠️  [%s] AI failed on diff part %d/%d: %v", shortSHA, pi+1, len(diffParts), partErr))
+													mu.Unlock()
+												} else {
 													partSummaries = append(partSummaries, ps)
 												}
 											}
@@ -582,14 +613,21 @@ skipMenuLoop:
 									}
 								}
 
-								// Fallback to commit message if diff analysis failed
+								// Fallback: use first line of commit message with informative label
+								// NOTE: collected into diffErrs — printed after spinner stops, never exported
+								isFallback := false
 								if summary == "" {
+									isFallback = true
 									msg := cm.GetCommit().GetMessage()
-									summary = "- " + strings.ReplaceAll(msg, "\n", " ")
+									firstLine := strings.Split(strings.TrimSpace(msg), "\n")[0]
+									summary = fmt.Sprintf("- [no diff] %s (%s)", firstLine, shortSHA)
+									mu.Lock()
+									diffErrs = append(diffErrs, fmt.Sprintf("  ⚠️  [%s] fallback to commit message: %q", shortSHA, firstLine))
+									mu.Unlock()
 								}
 
-								// Cache valid summary
-								if len(summary) > 15 {
+								// Cache only AI-generated summaries — never cache fallback entries
+								if !isFallback && len(summary) > 15 {
 									cc.Set(summaryKey, summary)
 								}
 								commitSummaries = append(commitSummaries, summary)
@@ -630,6 +668,15 @@ skipMenuLoop:
 					}(i)
 				}
 				wg.Wait(); _ = cc.Flush(); spin.Stop()
+
+				// Print diff analysis errors/warnings after spinner — safe from overwrite, never exported
+				if len(diffErrs) > 0 {
+					fmt.Fprintf(os.Stderr, "\n%s\n", color.YellowString("── Diff Analysis Warnings ──────────────────"))
+					for _, e := range diffErrs {
+						fmt.Fprintln(os.Stderr, e)
+					}
+					fmt.Fprintln(os.Stderr)
+				}
 
 				repoNames := ""; for i, br := range batchRepos { if i > 0 { repoNames += ", " }; repoNames += br.Owner + "/" + br.Repo }
 				headerPrefix := "# REPORT"; if len(batchRepos) > 1 { headerPrefix = "# BATCH REPORT" }
