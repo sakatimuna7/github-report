@@ -7,13 +7,10 @@ import (
 	"github-report-ai/pkg/ai"
 )
 
-const SecurityAuditPrompt = `You are a security auditor. Analyze the following git commit log for leaked secrets like API keys, passwords, private keys, or sensitive credentials. 
-
-Respond ONLY with a list of findings in this format:
-- [COMMIT_HASH] [SECRET_TYPE]: [DESCRIPTION]
-
-If no secrets are found, respond with "OK".
-
+const SecurityAuditPrompt = `Role:SecurityAuditor
+Task:Scan commit log untuk leaked secrets (API keys, passwords, private keys, credentials).
+Format findings:"- [HASH] [TYPE]: [DESCRIPTION]"
+Jika tidak ada temuan, jawab "OK" saja.
 Commit Log:
 `
 

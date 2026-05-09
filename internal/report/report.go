@@ -37,6 +37,15 @@ func filterOut(s []string, exclude string) []string {
 	return out
 }
 
+// isCleanBulletList returns true if every non-empty line starts with "- ".
+// Used to skip Phase 4 Verify when the report is already properly formatted.
+func isCleanBulletList(s string) bool {
+	for _, l := range strings.Split(strings.TrimSpace(s), "\n") {
+		if l != "" && !strings.HasPrefix(l, "- ") { return false }
+	}
+	return true
+}
+
 func Run(confPath string) {
 
 	fs := flag.NewFlagSet("ghreport", flag.ContinueOnError)
@@ -578,7 +587,7 @@ skipMenuLoop:
 								mu.Unlock()
 
 								// Check cache first
-								summaryKey := pipeline.ContentHash(fmt.Sprintf("diff-v4:%s/%s:%s", br.Owner, br.Repo, sha))
+								summaryKey := pipeline.ContentHash(fmt.Sprintf("diff-v5:%s/%s:%s", br.Owner, br.Repo, sha))
 								if cached, ok := cc.Get(summaryKey); ok && len(cached) > 15 {
 									commitSummaries = append(commitSummaries, cached)
 									continue
@@ -681,14 +690,16 @@ skipMenuLoop:
 							report, _ = fb(rm, pipeline.ReduceSysPrompt, strings.Join(sums, "\n---\n"))
 						}
 
-						// --- Phase 4/4: Verify & Polish ---
+						// --- Phase 4/4: Verify & Polish (skip if already clean) ---
 						mu.Lock()
 						spin.Suffix = color.HiBlackString(fmt.Sprintf(" Phase 4/4: ✅ Verifying format for %s/%s...", br.Owner, br.Repo))
 						mu.Unlock()
 
-						verified, verErr := fb(mm, pipeline.VerifySysPrompt, report)
-						if verErr == nil && len(verified) > len(report)/2 {
-							report = verified
+						if len(report) > 200 && !isCleanBulletList(report) {
+							verified, verErr := fb(mm, pipeline.VerifySysPrompt, report)
+							if verErr == nil && len(verified) > len(report)/2 {
+								report = verified
+							}
 						}
 
 						finalReports[idx] = fmt.Sprintf("%s/%s (%s)\n%s", br.Owner, br.Repo, br.Branch, report)

@@ -23,84 +23,75 @@ func ChunkByChar(raw string, maxChars int) []string {
 
 // ── Prompts untuk format simple per repo ─────────────────────────────────────
 
-const MapSysPrompt = `Role: SE
-Task: Konversi git commits ke daftar perubahan yang mendalam dan deskriptif
-Language: Bahasa Indonesia
-Rules:
-- Format: "- deskripsi perubahan"
-- Berikan detail teknis yang relevan dari pesan commit
-- Jangan terlalu menyingkat; pastikan maksud perubahan tetap jelas dan akurat
-- Fokus pada APA yang berubah dan MENGAPA (jika ada konteksnya)
-- Gunakan bahasa Indonesia yang natural
-- JANGAN gunakan prefix (feat/fix/chore/dll)
-- JANGAN gunakan bold atau formatting markdown`
+const MapSysPrompt = `Role:SE|Lang:ID
+Task:Konversi commit messages ke daftar perubahan teknis deskriptif.
+- Format:"- deskripsi". Detail APA berubah & MENGAPA jika ada. Bahasa natural.
+- JANGAN prefix feat/fix/chore. Output HANYA bullet list tanpa markdown/bold.`
 
-const ReduceSysPrompt = `Role: SE
-Task: Gabungkan daftar perubahan dari berbagai sumber menjadi satu daftar tanpa duplikat.
-Language: Bahasa Indonesia
-Rules:
-- PERTAHANKAN SEMUA entri yang unik — jangan hilangkan atau ringkas perubahan apapun.
-- HANYA hapus entri yang PERSIS IDENTIK secara kata per kata.
-- DILARANG menggabungkan, meringkas, atau menggeneralisasi entri yang berbeda.
-- DILARANG menambahkan interpretasi atau informasi baru yang tidak ada di input.
-- Format: setiap baris diawali "- " (minus spasi).
-- JANGAN gunakan bold (**) atau formatting markdown.
-- JANGAN tambahkan kalimat pembuka, penutup, atau penjelasan apapun.
-- Output HANYA berisi daftar bullet point dari input yang sudah ada.`
+const ReduceSysPrompt = `Role:SE|Lang:ID
+Task:Gabungkan daftar perubahan; hapus HANYA entri identik persis kata per kata.
+- Pertahankan semua entri unik. JANGAN ringkas/gabung/interpretasi entri berbeda.
+- Format:"- item". Output HANYA bullet list tanpa pembuka/penutup/markdown.`
 
-const VerifySysPrompt = `Role: Senior Editor
-Task: Verifikasi dan rapikan format laporan agar sesuai standar ketat.
-Rules:
-- SETIAP baris deskripsi HARUS dimulai dengan bullet point "-" (minus diikuti spasi).
-- HAPUS semua kalimat pembuka seperti "Berikut adalah...", "Rangkuman perubahan...", dll.
-- HAPUS semua kalimat penutup, kesimpulan, atau basa-basi.
-- JANGAN mengubah substansi teknis, hanya rapikan formatnya.
-- JANGAN gunakan bold (**) atau formatting markdown lainnya.
-- Output HANYA berisi daftar bullet point saja.`
+const VerifySysPrompt = `Role:Editor
+Task:Pastikan setiap baris dimulai "- ". Hapus kalimat pembuka/penutup/basa-basi.
+- Jangan ubah substansi teknis. Output HANYA bullet list tanpa markdown.`
 
-const DiffAnalyzeSysPrompt = `Role: Senior Software Engineer
-Task: Analisis kode perubahan (git diff) dan jelaskan apa yang terjadi secara teknis.
-Language: Bahasa Indonesia
-Rules:
-- Analisis HANYA baris yang diawali (+) sebagai penambahan dan (-) sebagai penghapusan.
-- Jelaskan perubahan logika atau fungsionalitas, BUKAN sekadar "menambah/menghapus baris".
-- Sebutkan nama file dan fungsi yang berubah jika terlihat dari diff.
-- Format: "- deskripsi perubahan teknis"
-- JANGAN berhalusinasi. Jika diff tidak informatif, gunakan COMMIT_MESSAGE sebagai acuan.
-- JANGAN buat informasi yang tidak ada di diff atau commit message.
-- JANGAN gunakan bold (**) atau formatting markdown.
-- Output HANYA daftar bullet point.`
+const DiffAnalyzeSysPrompt = `Role:SE|Lang:ID
+Task:Analisis git diff, jelaskan perubahan teknis & logika secara deskriptif.
+- Fokus baris +/- saja. Sebut file & fungsi jika terlihat dari diff.
+- Format:"- deskripsi". Jika diff tidak informatif, gunakan COMMIT_MESSAGE.
+- JANGAN halusinasi. Output HANYA bullet list tanpa markdown.`
+
+// noiseFileSuffixes lists file patterns that add no value to diff analysis.
+var noiseFileSuffixes = []string{
+	"go.sum", "go.lock", "package-lock.json", "yarn.lock",
+	"pnpm-lock.yaml", "Gemfile.lock", "Cargo.lock",
+	".min.js", ".min.css", ".js.map", ".css.map",
+}
+
+func isNoiseFile(name string) bool {
+	for _, suffix := range noiseFileSuffixes {
+		if strings.HasSuffix(name, suffix) { return true }
+	}
+	return false
+}
 
 // CavemanDiff strips boilerplate from git diffs, keeping only meaningful changes.
-// It preserves file names for context and strips index/metadata lines.
+// Filters out noise files (lock files, minified assets) and hunk headers.
 func CavemanDiff(diff string) string {
 	lines := strings.Split(diff, "\n")
 	var optimized []string
+	skipFile := false
 	for _, line := range lines {
-		// Keep file names for context
+		// File boundary
 		if strings.HasPrefix(line, "diff --git") {
 			parts := strings.Split(line, " b/")
 			if len(parts) >= 2 {
-				optimized = append(optimized, "FILE: "+parts[len(parts)-1])
+				fname := parts[len(parts)-1]
+				skipFile = isNoiseFile(fname)
+				if !skipFile {
+					optimized = append(optimized, "FILE: "+fname)
+				}
 			}
 			continue
 		}
-		// Keep hunk headers for location context
-		if strings.HasPrefix(line, "@@") {
-			optimized = append(optimized, line)
+		if skipFile { continue }
+		// Strip metadata and hunk headers — AI only needs file name + +/- lines
+		if strings.HasPrefix(line, "index ") ||
+			strings.HasPrefix(line, "--- ") ||
+			strings.HasPrefix(line, "+++ ") ||
+			strings.HasPrefix(line, "@@") {
 			continue
 		}
-		// Strip metadata lines
-		if strings.HasPrefix(line, "index ") || strings.HasPrefix(line, "--- ") || strings.HasPrefix(line, "+++ ") {
-			continue
-		}
-		// Keep actual changes
+		// Keep actual changes only
 		if strings.HasPrefix(line, "+") || strings.HasPrefix(line, "-") {
 			optimized = append(optimized, line)
 		}
 	}
 	return strings.Join(optimized, "\n")
 }
+
 
 // ToonEncode compresses key-value metadata into a compact delimited format.
 func ToonEncode(data map[string]string) string {
