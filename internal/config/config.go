@@ -85,7 +85,7 @@ func copyDir(src string, dst string) error {
 		} else {
 			data, err := os.ReadFile(filepath.Join(src, entry.Name()))
 			if err == nil {
-				_ = os.WriteFile(filepath.Join(dst, entry.Name()), data, 0644)
+				_ = os.WriteFile(filepath.Join(dst, entry.Name()), data, 0600)
 			}
 		}
 	}

@@ -45,7 +45,8 @@ type GeminiResponse struct {
 }
 
 func (c *GeminiClient) GenerateReport(ctx context.Context, model, systemPrompt, data string) (string, Usage, error) {
-	url := fmt.Sprintf("https://generativelanguage.googleapis.com/v1beta/models/%s:generateContent?key=%s", model, c.APIKey)
+	// API key sent via header (not URL) to avoid exposure in logs/proxies
+	url := fmt.Sprintf("https://generativelanguage.googleapis.com/v1beta/models/%s:generateContent", model)
 
 	var usage Usage
 
@@ -72,6 +73,7 @@ func (c *GeminiClient) GenerateReport(ctx context.Context, model, systemPrompt, 
 	}
 
 	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("x-goog-api-key", c.APIKey) // key via header, not URL query param
 
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
