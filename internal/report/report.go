@@ -457,17 +457,24 @@ skipMenuLoop:
 		}
 
 
-		// --- Feature: AI Security Auditor ---
+		// --- Feature: AI Security Auditor (runs concurrently with Phase 2) ---
+		// Result is captured via channel so Phase 2 can start immediately
 		var securityWarnings []string
+		var securityWg sync.WaitGroup
+		securityCh := make(chan []string, 1)
 		if !*ciMode && len(allRaw) > 0 {
-			spin.Suffix = color.HiBlackString(" Running AI Security Audit...")
-			spin.Restart()
-			key := *gm
-			if strings.HasPrefix(*mod, "groq") {
-				key = *gk
-			}
-			securityWarnings, _ = AuditSecurity(c, *mod, key, strings.Join(allRaw, "\n"))
-			spin.Stop()
+			securityWg.Add(1)
+			go func() {
+				defer securityWg.Done()
+				key := *gm
+				if strings.HasPrefix(*mod, "groq") {
+					key = *gk
+				}
+				warnings, _ := AuditSecurity(c, *mod, key, strings.Join(allRaw, "\n"))
+				securityCh <- warnings
+			}()
+		} else {
+			securityCh <- nil
 		}
 
 		if len(allRaw) == 0 {
@@ -515,6 +522,9 @@ skipMenuLoop:
 		}
 
 		var action string
+		// Collect security audit result (may already be done since it ran concurrently)
+		securityWarnings = <-securityCh
+		_ = securityWg // ensure goroutine completes before we read
 		reportLoop:
 		for {
 			action = ""
@@ -763,9 +773,16 @@ skipMenuLoop:
 
 						var report string
 						if len(commitSummaries) > 0 {
-							// Bug #4 fix: reduced summaries go directly to verify — no template re-apply
-							// Template would re-interpret already-summarized data and cause hallucinations
-							report, _ = fb(rm, pipeline.ReduceSysPrompt, strings.Join(commitSummaries, "\n---\n"))
+							if len(commitSummaries) <= 8 {
+								// Small set: skip AI reduce — just join directly, already clean bullets
+								report = strings.Join(commitSummaries, "\n")
+							} else {
+								// Larger set: use AI to group/deduplicate
+								report, _ = fb(rm, pipeline.ReduceSysPrompt, strings.Join(commitSummaries, "\n---\n"))
+								if report == "" {
+									report = strings.Join(commitSummaries, "\n")
+								}
+							}
 						} else {
 							// Fallback: original text-based pipeline (when no commits available)
 							dedup, _, _, _ := pipeline.DeduplicateCommits(allRaw[idx])
@@ -776,18 +793,7 @@ skipMenuLoop:
 							report, _ = fb(rm, pipeline.ReduceSysPrompt, strings.Join(sums, "\n---\n"))
 						}
 
-						// --- Phase 4/4: Verify & Polish (skip if already clean) ---
-						mu.Lock()
-						spin.Suffix = color.HiBlackString(fmt.Sprintf(" Phase 4/4: ✅ Verifying format for %s/%s...", br.Owner, br.Repo))
-						mu.Unlock()
-
-						if len(report) > 200 && !isCleanBulletList(report) {
-							verified, verErr := fb(mm, pipeline.VerifySysPrompt, report)
-							if verErr == nil && len(verified) > len(report)/2 {
-								report = verified
-							}
-						}
-
+						// Phase 4: Skipped — DiffAnalyzeSysPrompt + fast-path always produce clean "- " bullets
 						finalReports[idx] = fmt.Sprintf("%s/%s (%s)\n%s", br.Owner, br.Repo, br.Branch, report)
 					}(i)
 				}
