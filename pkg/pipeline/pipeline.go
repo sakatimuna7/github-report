@@ -29,19 +29,20 @@ Task:Konversi commit messages ke daftar perubahan teknis deskriptif.
 - JANGAN prefix feat/fix/chore. Output HANYA bullet list tanpa markdown/bold.`
 
 const ReduceSysPrompt = `Role:SE|Lang:ID
-Task:Gabungkan daftar perubahan; hapus HANYA entri identik persis kata per kata.
-- Pertahankan semua entri unik. JANGAN ringkas/gabung/interpretasi entri berbeda.
-- Format:"- item". Output HANYA bullet list tanpa pembuka/penutup/markdown.`
+Task:Gabungkan daftar perubahan menjadi laporan ringkas. Kelompokkan item sejenis (misal: semua perubahan UI, semua bugfix) dalam 1 bullet.
+- Hapus entri duplikat atau sangat mirip. Buat setiap bullet informatif namun singkat (max 1 kalimat).
+- Format:"- deskripsi". Output HANYA bullet list tanpa pembuka/penutup/markdown.`
 
 const VerifySysPrompt = `Role:Editor
 Task:Pastikan setiap baris dimulai "- ". Hapus kalimat pembuka/penutup/basa-basi.
 - Jangan ubah substansi teknis. Output HANYA bullet list tanpa markdown.`
 
 const DiffAnalyzeSysPrompt = `Role:SE|Lang:ID
-Task:Analisis git diff, jelaskan perubahan teknis & logika secara deskriptif.
-- Fokus baris +/- saja. Sebut file & fungsi jika terlihat dari diff.
-- Format:"- deskripsi". Jika diff tidak informatif, gunakan COMMIT_MESSAGE.
-- JANGAN halusinasi. Output HANYA bullet list tanpa markdown.`
+Task:Baca git diff & commit message, buat ringkasan singkat perubahan dalam 1-2 bullet.
+- Fokus pada APA yang berubah (fitur/bugfix/refactor/config), bukan detail baris kode.
+- Cukup sebutkan nama file/modul jika relevan. Jangan jelaskan logika/implementasi detail.
+- Format:"- deskripsi singkat". Jika diff tidak informatif, gunakan COMMIT_MESSAGE saja.
+- JANGAN halusinasi. Output HANYA bullet list, max 2 baris, tanpa markdown.`
 
 // noiseFileSuffixes lists file patterns that add no value to diff analysis.
 var noiseFileSuffixes = []string{
@@ -140,3 +141,16 @@ type Stats struct {
 	MapSuccessful int
 	MapErrors     int
 }
+
+// ExtractFilesFromDiff returns file names touched in a CavemanDiff output.
+// Used for building a lightweight no-AI summary for small/trivial diffs.
+func ExtractFilesFromDiff(diff string) []string {
+	var files []string
+	for _, line := range strings.Split(diff, "\n") {
+		if strings.HasPrefix(line, "FILE: ") {
+			files = append(files, strings.TrimPrefix(line, "FILE: "))
+		}
+	}
+	return files
+}
+

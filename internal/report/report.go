@@ -376,6 +376,87 @@ skipMenuLoop:
 		}
 		spin.Stop()
 
+		// --- Commit Selection Feature ---
+		if !*ciMode {
+			var filteredRaw []string
+			var filteredCommitsList [][]*ghLib.RepositoryCommit
+			var filteredTotalStats github.CommitStats
+
+			for idx, br := range batchRepos {
+				if idx >= len(allCommitsList) {
+					continue
+				}
+				commits := allCommitsList[idx]
+				if len(commits) == 0 {
+					filteredCommitsList = append(filteredCommitsList, commits)
+					continue
+				}
+
+				var opts []huh.Option[string]
+				var selectedSHAs []string
+				for _, commit := range commits {
+					sha := commit.GetSHA()
+					shortSHA := sha
+					if len(sha) > 7 {
+						shortSHA = sha[:7]
+					}
+					msg := strings.Split(strings.TrimSpace(commit.GetCommit().GetMessage()), "\n")[0]
+					author := commit.GetCommit().GetAuthor().GetName()
+					date := commit.GetCommit().GetAuthor().GetDate().Format("02/01/06 15:04")
+					
+					label := fmt.Sprintf("[%s] %s (%s, by %s)", shortSHA, msg, date, author)
+					opts = append(opts, huh.NewOption(label, sha))
+					selectedSHAs = append(selectedSHAs, sha)
+				}
+
+				var userSelectedSHAs []string
+				err := huh.NewMultiSelect[string]().
+					Title(fmt.Sprintf("Select Commits for %s/%s", br.Owner, br.Repo)).
+					Description("Choose which commits to include in the report (space to select/deselect)").
+					Options(opts...).
+					Value(&userSelectedSHAs).
+					Run()
+
+				if err != nil {
+					// User cancelled prompt, fallback to selecting all
+					color.Yellow("⚠️ Commit selection cancelled, including all commits by default.")
+					userSelectedSHAs = selectedSHAs
+				}
+
+				if len(userSelectedSHAs) == 0 {
+					color.Red("❌ No commits selected! Proceeding with all commits instead.")
+					userSelectedSHAs = selectedSHAs
+				}
+
+				// Filter commits
+				var selectedCommits []*ghLib.RepositoryCommit
+				shaMap := make(map[string]bool)
+				for _, sha := range userSelectedSHAs {
+					shaMap[sha] = true
+				}
+				for _, commit := range commits {
+					if shaMap[commit.GetSHA()] {
+						selectedCommits = append(selectedCommits, commit)
+					}
+				}
+
+				// Rebuild stats and raw text
+				repoRaw, repoStats := rebuildRepoData(br.Owner, br.Repo, br.Branch, selectedCommits, ws, we)
+
+				filteredRaw = append(filteredRaw, fmt.Sprintf("=== REPOSITORY: %s/%s ===\n%s", br.Owner, br.Repo, repoRaw))
+				filteredCommitsList = append(filteredCommitsList, selectedCommits)
+				filteredTotalStats.Total += repoStats.Total
+				filteredTotalStats.Features += repoStats.Features
+				filteredTotalStats.Fixes += repoStats.Fixes
+				filteredTotalStats.Overtime += repoStats.Overtime
+			}
+
+			allRaw = filteredRaw
+			allCommitsList = filteredCommitsList
+			totalStats = filteredTotalStats
+		}
+
+
 		// --- Feature: AI Security Auditor ---
 		var securityWarnings []string
 		if !*ciMode && len(allRaw) > 0 {
@@ -561,112 +642,117 @@ skipMenuLoop:
 
 						var commitSummaries []string
 
-						// --- Phase 2/4: Deep Diff Analysis per-commit ---
+						// --- Phase 2/4: Commit Analysis (parallel, max 4 concurrent) ---
 						if idx < len(allCommitsList) && len(allCommitsList[idx]) > 0 {
 							commits := allCommitsList[idx]
 							gh := github.NewClient(*tok)
-							startTime := time.Now()
+
+							type commitResult struct {
+								idx     int
+								summary string
+							}
+
+							semaphore := make(chan struct{}, 4) // max 4 concurrent AI calls
+							resultsCh := make(chan commitResult, len(commits))
+							var commitWg sync.WaitGroup
 
 							for j, cm := range commits {
 								sha := cm.GetSHA()
-								if sha == "" { continue }
+								if sha == "" {
+									continue
+								}
 								shortSHA := sha
-								if len(sha) > 7 { shortSHA = sha[:7] }
-
-								// Time estimate
-								elapsed := time.Since(startTime)
-								var estRemain string
-								if j > 0 {
-									avg := elapsed / time.Duration(j)
-									remaining := avg * time.Duration(len(commits)-j)
-									estRemain = fmt.Sprintf(" (est. ~%s)", remaining.Round(time.Second))
+								if len(sha) > 7 {
+									shortSHA = sha[:7]
 								}
 
 								mu.Lock()
-								spin.Suffix = color.HiBlackString(fmt.Sprintf(" Phase 2/4: 🔍 Deep Analysis [%d/%d] %s%s", j+1, len(commits), shortSHA, estRemain))
+								spin.Suffix = color.HiBlackString(fmt.Sprintf(" Phase 2/4: 🔍 Analysing [%d/%d] %s", j+1, len(commits), shortSHA))
 								mu.Unlock()
 
-								// Check cache first
-								summaryKey := pipeline.ContentHash(fmt.Sprintf("diff-v5:%s/%s:%s", br.Owner, br.Repo, sha))
+								// --- Check cache BEFORE spawning goroutine ---
+								summaryKey := pipeline.ContentHash(fmt.Sprintf("diff-v7:%s/%s:%s", br.Owner, br.Repo, sha))
 								if cached, ok := cc.Get(summaryKey); ok && len(cached) > 15 {
-									commitSummaries = append(commitSummaries, cached)
+									resultsCh <- commitResult{j, cached}
 									continue
 								}
 
-								// Fetch diff
-								patch, patchErr := gh.GetCommitPatch(c, br.Owner, br.Repo, sha)
+								commitWg.Add(1)
+								go func(commitIdx int, cm interface{ GetSHA() string }, sha, shortSHA, summaryKey string) {
+									defer commitWg.Done()
+									semaphore <- struct{}{}
+									defer func() { <-semaphore }()
 
-								var summary string
-								if patchErr != nil {
-									mu.Lock()
-									diffErrs = append(diffErrs, fmt.Sprintf("  ⚠️  [%s] patch fetch error: %v", shortSHA, patchErr))
-									mu.Unlock()
-								} else if patch == "" {
-									mu.Lock()
-									diffErrs = append(diffErrs, fmt.Sprintf("  ⚠️  [%s] no patch returned (merge/empty commit)", shortSHA))
-									mu.Unlock()
-								} else {
+									// Need the actual commit object — capture it from the outer range
+									gcm := commits[commitIdx]
+
+									rawMsg := strings.TrimSpace(gcm.GetCommit().GetMessage())
+									firstLine := strings.Split(rawMsg, "\n")[0]
+									rawMsg = strings.ReplaceAll(rawMsg, "\n", " ")
+
+									// Fetch diff
+									patch, patchErr := gh.GetCommitPatch(c, br.Owner, br.Repo, sha)
+
+									var summary string
+									if patchErr != nil || patch == "" {
+										// No patch: use commit message as-is (no AI)
+										summary = fmt.Sprintf("- %s", firstLine)
+										resultsCh <- commitResult{commitIdx, summary}
+										return
+									}
+
 									optimized := pipeline.CavemanDiff(patch)
 									if optimized == "" {
-										mu.Lock()
-										diffErrs = append(diffErrs, fmt.Sprintf("  ⚠️  [%s] CavemanDiff empty (non-informative diff)", shortSHA))
-										mu.Unlock()
-									} else {
-										// Bug #2 fix: plain text, no ToonEncode in COMMIT_MESSAGE
-										rawMsg := strings.TrimSpace(cm.GetCommit().GetMessage())
-										rawMsg = strings.ReplaceAll(rawMsg, "\n", " ")
-
-										// Split large diffs
-										diffParts := pipeline.SplitDiffByFile(optimized, 3000)
-
-										if len(diffParts) <= 1 {
-											input := fmt.Sprintf("COMMIT_MESSAGE: %s\nDIFF:\n%s", rawMsg, optimized)
-											var aiErr error
-											summary, aiErr = fbDiff(pipeline.DiffAnalyzeSysPrompt, input)
-											if aiErr != nil || summary == "" {
-												mu.Lock()
-												diffErrs = append(diffErrs, fmt.Sprintf("  ⚠️  [%s] AI diff analysis failed: %v", shortSHA, aiErr))
-												mu.Unlock()
-											}
-										} else {
-											// Bug #2 fix: plain text for split parts too
-											var partSummaries []string
-											for pi, part := range diffParts {
-												input := fmt.Sprintf("COMMIT_MESSAGE: %s\nDIFF:\n%s", rawMsg, part)
-												ps, partErr := fbDiff(pipeline.DiffAnalyzeSysPrompt, input)
-												if partErr != nil || ps == "" {
-													mu.Lock()
-													diffErrs = append(diffErrs, fmt.Sprintf("  ⚠️  [%s] AI failed on diff part %d/%d: %v", shortSHA, pi+1, len(diffParts), partErr))
-													mu.Unlock()
-												} else {
-													partSummaries = append(partSummaries, ps)
-												}
-											}
-											if len(partSummaries) > 0 {
-												summary = strings.Join(partSummaries, "\n")
-											}
-										}
+										summary = fmt.Sprintf("- %s", firstLine)
+										resultsCh <- commitResult{commitIdx, summary}
+										return
 									}
-								}
 
-								// Fallback: use first line of commit message with informative label
-								// NOTE: collected into diffErrs — printed after spinner stops, never exported
-								isFallback := false
-								if summary == "" {
-									isFallback = true
-									msg := cm.GetCommit().GetMessage()
-									firstLine := strings.Split(strings.TrimSpace(msg), "\n")[0]
-									summary = fmt.Sprintf("- [no diff] %s (%s)", firstLine, shortSHA)
-									mu.Lock()
-									diffErrs = append(diffErrs, fmt.Sprintf("  ⚠️  [%s] fallback to commit message: %q", shortSHA, firstLine))
-									mu.Unlock()
-								}
+									// --- Fast path: tiny diff — skip AI, derive from message + files ---
+									if len(optimized) < 400 {
+										files := pipeline.ExtractFilesFromDiff(optimized)
+										if len(files) > 0 {
+											shown := files
+											if len(shown) > 2 {
+												shown = append(files[:2], fmt.Sprintf("+%d files", len(files)-2))
+											}
+											summary = fmt.Sprintf("- %s (%s)", firstLine, strings.Join(shown, ", "))
+										} else {
+											summary = fmt.Sprintf("- %s", firstLine)
+										}
+										cc.Set(summaryKey, summary)
+										resultsCh <- commitResult{commitIdx, summary}
+										return
+									}
 
-								// Cache only AI-generated summaries — never cache fallback entries
-								if !isFallback && len(summary) > 15 {
-									cc.Set(summaryKey, summary)
+									// --- Normal path: send to AI ---
+									if len(optimized) > 4000 {
+										optimized = optimized[:4000]
+									}
+									input := fmt.Sprintf("COMMIT_MESSAGE: %s\nDIFF:\n%s", rawMsg, optimized)
+									var aiErr error
+									summary, aiErr = fbDiff(pipeline.DiffAnalyzeSysPrompt, input)
+									if aiErr != nil || summary == "" {
+										summary = fmt.Sprintf("- %s", firstLine)
+									} else {
+										cc.Set(summaryKey, summary)
+									}
+									resultsCh <- commitResult{commitIdx, summary}
+								}(j, cm, sha, shortSHA, summaryKey)
+							}
+
+							commitWg.Wait()
+							close(resultsCh)
+
+							// Collect results in original order
+							ordered := make([]string, len(commits))
+							for r := range resultsCh {
+								ordered[r.idx] = r.summary
+							}
+							for _, s := range ordered {
+								if s != "" {
+									commitSummaries = append(commitSummaries, s)
 								}
-								commitSummaries = append(commitSummaries, summary)
 							}
 						}
 
@@ -820,3 +906,50 @@ func fetchAndSelectBranches(ctx context.Context, tok, owner, repo string, defaul
 
 	return selectedBranches, err
 }
+
+func rebuildRepoData(owner, repo, branch string, commits []*ghLib.RepositoryCommit, workStart, workEnd int) (string, github.CommitStats) {
+	stats := github.CommitStats{Total: len(commits)}
+	var sb strings.Builder
+	sb.WriteString(fmt.Sprintf("Repo: %s/%s | Branch: %s\n\n", owner, repo, branch))
+	sb.WriteString(fmt.Sprintf("Total activity fetched: %d commits\n", len(commits)))
+
+	lastDate := ""
+	for _, commit := range commits {
+		fullMsg := commit.GetCommit().GetMessage()
+		lowerMsg := strings.ToLower(fullMsg)
+		
+		// Basic conventional commit detection
+		if strings.HasPrefix(lowerMsg, "feat") {
+			stats.Features++
+		} else if strings.HasPrefix(lowerMsg, "fix") {
+			stats.Fixes++
+		} else if strings.HasPrefix(lowerMsg, "refactor") || strings.HasPrefix(lowerMsg, "perf") || strings.HasPrefix(lowerMsg, "style") {
+			stats.Refactors++
+		} else if strings.HasPrefix(lowerMsg, "docs") {
+			stats.Docs++
+		} else {
+			stats.Others++
+		}
+		
+		// Overtime check: Outside workStart to workEnd
+		date := commit.GetCommit().GetAuthor().GetDate()
+		hour := date.Hour()
+		if hour >= workEnd || hour < workStart {
+			stats.Overtime++
+		}
+
+		msg := strings.ReplaceAll(fullMsg, "\n", " ")
+		author := commit.GetCommit().GetAuthor().GetName()
+		fullDate := commit.GetCommit().GetAuthor().GetDate().Format("2006-01-02")
+		
+		if fullDate != lastDate {
+			sb.WriteString(fmt.Sprintf("\n[%s]\n", fullDate))
+			lastDate = fullDate
+		}
+		
+		sb.WriteString(fmt.Sprintf("- %s (by %s)\n", msg, author))
+	}
+
+	return sb.String(), stats
+}
+
