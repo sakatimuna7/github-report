@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -377,84 +378,113 @@ skipMenuLoop:
 		spin.Stop()
 
 		// --- Commit Selection Feature ---
-		if !*ciMode {
-			var filteredRaw []string
-			var filteredCommitsList [][]*ghLib.RepositoryCommit
-			var filteredTotalStats github.CommitStats
+			if !*ciMode {
+				var filteredRaw []string
+				var filteredCommitsList [][]*ghLib.RepositoryCommit
+				var filteredTotalStats github.CommitStats
 
-			for idx, br := range batchRepos {
-				if idx >= len(allCommitsList) {
-					continue
-				}
-				commits := allCommitsList[idx]
-				if len(commits) == 0 {
-					filteredCommitsList = append(filteredCommitsList, commits)
-					continue
-				}
-
-				var opts []huh.Option[string]
-				var selectedSHAs []string
-				for _, commit := range commits {
-					sha := commit.GetSHA()
-					shortSHA := sha
-					if len(sha) > 7 {
-						shortSHA = sha[:7]
+				for idx, br := range batchRepos {
+					if idx >= len(allCommitsList) {
+						continue
 					}
-					msg := strings.Split(strings.TrimSpace(commit.GetCommit().GetMessage()), "\n")[0]
-					author := commit.GetCommit().GetAuthor().GetName()
-					date := commit.GetCommit().GetAuthor().GetDate().Format("02/01/06 15:04")
-					
-					label := fmt.Sprintf("[%s] %s (%s, by %s)", shortSHA, msg, date, author)
-					opts = append(opts, huh.NewOption(label, sha))
-					selectedSHAs = append(selectedSHAs, sha)
-				}
-
-				var userSelectedSHAs []string
-				err := huh.NewMultiSelect[string]().
-					Title(fmt.Sprintf("Select Commits for %s/%s", br.Owner, br.Repo)).
-					Description("Choose which commits to include in the report (space to select/deselect)").
-					Options(opts...).
-					Value(&userSelectedSHAs).
-					Run()
-
-				if err != nil {
-					// User cancelled prompt, fallback to selecting all
-					color.Yellow("⚠️ Commit selection cancelled, including all commits by default.")
-					userSelectedSHAs = selectedSHAs
-				}
-
-				if len(userSelectedSHAs) == 0 {
-					color.Red("❌ No commits selected! Proceeding with all commits instead.")
-					userSelectedSHAs = selectedSHAs
-				}
-
-				// Filter commits
-				var selectedCommits []*ghLib.RepositoryCommit
-				shaMap := make(map[string]bool)
-				for _, sha := range userSelectedSHAs {
-					shaMap[sha] = true
-				}
-				for _, commit := range commits {
-					if shaMap[commit.GetSHA()] {
-						selectedCommits = append(selectedCommits, commit)
+					commits := allCommitsList[idx]
+					if len(commits) == 0 {
+						filteredCommitsList = append(filteredCommitsList, commits)
+						continue
 					}
+
+					var opts []huh.Option[string]
+					var selectedSHAs []string
+					for _, commit := range commits {
+						sha := commit.GetSHA()
+						shortSHA := sha
+						if len(sha) > 7 {
+							shortSHA = sha[:7]
+						}
+						msg := strings.Split(strings.TrimSpace(commit.GetCommit().GetMessage()), "\n")[0]
+						author := commit.GetCommit().GetAuthor().GetName()
+						date := commit.GetCommit().GetAuthor().GetDate().Format("02/01/06 15:04")
+
+						// Check if overtime (outside work hours: 09:00-17:00)
+						timeOnly := strings.Split(date, " ")[1]
+						isOvertime := false
+						if len(timeOnly) >= 5 {
+							hour, err := strconv.Atoi(timeOnly[0:2])
+							if err == nil && timeOnly[2] == ':' {
+								if hour < ws || hour >= we {
+									isOvertime = true
+								}
+							}
+						}
+
+						// Add overtime indicator
+						overtimeTag := ""
+						if isOvertime {
+							overtimeTag = " (🔴 Overtime)"
+						}
+
+						label := fmt.Sprintf("[%s] %s (%s, by %s)%s", shortSHA, msg, date, author, overtimeTag)
+						opts = append(opts, huh.NewOption(label, sha))
+						selectedSHAs = append(selectedSHAs, sha)
+					}
+
+					// Add "Select All" option before other options
+					opts = append([]huh.Option[string]{
+						huh.NewOption("✅ Select All / Deselect All", "select-all"),
+					}, opts...)
+
+					var userSelectedSHAs []string
+					err := huh.NewMultiSelect[string]().
+						Title(fmt.Sprintf("Select Commits for %s/%s", br.Owner, br.Repo)).
+						Description("Choose which commits to include in the report (space to select/deselect). Red text indicates overtime commits.").
+						Options(opts...).
+						Value(&userSelectedSHAs).
+						Run()
+
+					if err != nil {
+						// User cancelled prompt, fallback to selecting all
+						color.Yellow("⚠️ Commit selection cancelled, including all commits by default.")
+						userSelectedSHAs = selectedSHAs
+					}
+
+					// Handle Select All / Deselect All
+					if len(userSelectedSHAs) > 0 && userSelectedSHAs[0] == "select-all" {
+						color.Cyan("🔄 Selecting all commits...")
+						userSelectedSHAs = selectedSHAs
+					}
+
+					if len(userSelectedSHAs) == 0 {
+						color.Red("❌ No commits selected! Proceeding with all commits instead.")
+						userSelectedSHAs = selectedSHAs
+					}
+
+					// Filter commits
+					var selectedCommits []*ghLib.RepositoryCommit
+					shaMap := make(map[string]bool)
+					for _, sha := range userSelectedSHAs {
+						shaMap[sha] = true
+					}
+					for _, commit := range commits {
+						if shaMap[commit.GetSHA()] {
+							selectedCommits = append(selectedCommits, commit)
+						}
+					}
+
+					// Rebuild stats and raw text
+					repoRaw, repoStats := rebuildRepoData(br.Owner, br.Repo, br.Branch, selectedCommits, ws, we)
+
+					filteredRaw = append(filteredRaw, fmt.Sprintf("=== REPOSITORY: %s/%s ===\n%s", br.Owner, br.Repo, repoRaw))
+					filteredCommitsList = append(filteredCommitsList, selectedCommits)
+					filteredTotalStats.Total += repoStats.Total
+					filteredTotalStats.Features += repoStats.Features
+					filteredTotalStats.Fixes += repoStats.Fixes
+					filteredTotalStats.Overtime += repoStats.Overtime
 				}
 
-				// Rebuild stats and raw text
-				repoRaw, repoStats := rebuildRepoData(br.Owner, br.Repo, br.Branch, selectedCommits, ws, we)
-
-				filteredRaw = append(filteredRaw, fmt.Sprintf("=== REPOSITORY: %s/%s ===\n%s", br.Owner, br.Repo, repoRaw))
-				filteredCommitsList = append(filteredCommitsList, selectedCommits)
-				filteredTotalStats.Total += repoStats.Total
-				filteredTotalStats.Features += repoStats.Features
-				filteredTotalStats.Fixes += repoStats.Fixes
-				filteredTotalStats.Overtime += repoStats.Overtime
+				allRaw = filteredRaw
+				allCommitsList = filteredCommitsList
+				totalStats = filteredTotalStats
 			}
-
-			allRaw = filteredRaw
-			allCommitsList = filteredCommitsList
-			totalStats = filteredTotalStats
-		}
 
 
 		// --- Feature: AI Security Auditor (runs concurrently with Phase 2) ---
