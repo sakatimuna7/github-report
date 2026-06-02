@@ -748,26 +748,9 @@ skipMenuLoop:
 										return
 									}
 
-									// --- Fast path: tiny diff — skip AI, derive from message + files ---
-									if len(optimized) < 400 {
-										files := pipeline.ExtractFilesFromDiff(optimized)
-										if len(files) > 0 {
-											shown := files
-											if len(shown) > 2 {
-												shown = append(files[:2], fmt.Sprintf("+%d files", len(files)-2))
-											}
-											summary = fmt.Sprintf("- %s (%s)", firstLine, strings.Join(shown, ", "))
-										} else {
-											summary = fmt.Sprintf("- %s", firstLine)
-										}
-										cc.Set(summaryKey, summary)
-										resultsCh <- commitResult{commitIdx, summary}
-										return
-									}
-
 									// --- Normal path: send to AI ---
-									if len(optimized) > 4000 {
-										optimized = optimized[:4000]
+									if len(optimized) > 6000 {
+										optimized = optimized[:6000]
 									}
 									input := fmt.Sprintf("COMMIT_MESSAGE: %s\nDIFF:\n%s", rawMsg, optimized)
 									var aiErr error
@@ -803,15 +786,10 @@ skipMenuLoop:
 
 						var report string
 						if len(commitSummaries) > 0 {
-							if len(commitSummaries) <= 8 {
-								// Small set: skip AI reduce — just join directly, already clean bullets
+							// Always run AI reduce to produce richer, more detailed output
+							report, _ = fb(rm, pipeline.ReduceSysPrompt, strings.Join(commitSummaries, "\n---\n"))
+							if report == "" {
 								report = strings.Join(commitSummaries, "\n")
-							} else {
-								// Larger set: use AI to group/deduplicate
-								report, _ = fb(rm, pipeline.ReduceSysPrompt, strings.Join(commitSummaries, "\n---\n"))
-								if report == "" {
-									report = strings.Join(commitSummaries, "\n")
-								}
 							}
 						} else {
 							// Fallback: original text-based pipeline (when no commits available)

@@ -29,20 +29,21 @@ Task:Konversi commit messages ke daftar perubahan teknis deskriptif.
 - JANGAN prefix feat/fix/chore. Output HANYA bullet list tanpa markdown/bold.`
 
 const ReduceSysPrompt = `Role:SE|Lang:ID
-Task:Gabungkan daftar perubahan menjadi laporan ringkas. Kelompokkan item sejenis (misal: semua perubahan UI, semua bugfix) dalam 1 bullet.
-- Hapus entri duplikat atau sangat mirip. Buat setiap bullet informatif namun singkat (max 1 kalimat).
-- Format:"- deskripsi". Output HANYA bullet list tanpa pembuka/penutup/markdown.`
+Task:Gabungkan daftar perubahan menjadi laporan teknis yang informatif. Kelompokkan item sejenis (misal: semua perubahan UI, semua bugfix) dalam 1 bullet yang deskriptif.
+- Hapus entri yang IDENTIK, tapi pertahankan detail teknis penting meskipun mirip.
+- Setiap bullet harus informatif: APA yang berubah, file/modul terkait, dan DAMPAKNYA jika ada.
+- Format:"- deskripsi detail". Output HANYA bullet list tanpa pembuka/penutup/markdown.`
 
 const VerifySysPrompt = `Role:Editor
 Task:Pastikan setiap baris dimulai "- ". Hapus kalimat pembuka/penutup/basa-basi.
 - Jangan ubah substansi teknis. Output HANYA bullet list tanpa markdown.`
 
 const DiffAnalyzeSysPrompt = `Role:SE|Lang:ID
-Task:Baca git diff & commit message, buat ringkasan singkat perubahan dalam 1-2 bullet.
-- Fokus pada APA yang berubah (fitur/bugfix/refactor/config), bukan detail baris kode.
-- Cukup sebutkan nama file/modul jika relevan. Jangan jelaskan logika/implementasi detail.
-- Format:"- deskripsi singkat". Jika diff tidak informatif, gunakan COMMIT_MESSAGE saja.
-- JANGAN halusinasi. Output HANYA bullet list, max 2 baris, tanpa markdown.`
+Task:Baca git diff & commit message, buat ringkasan teknis perubahan dalam 1-3 bullet.
+- Fokus pada APA yang berubah (fitur/bugfix/refactor/config), file/modul terkait, dan MENGAPA jika terlihat dari diff.
+- Jelaskan perubahan logis/fungsional, bukan sekadar nama file. Contoh: "Menambahkan validasi input pada form login (auth/login.go)"
+- Format:"- deskripsi teknis". Jika diff tidak informatif, gunakan COMMIT_MESSAGE.
+- JANGAN halusinasi. Output HANYA bullet list, max 3 baris, tanpa markdown.`
 
 // noiseFileSuffixes lists file patterns that add no value to diff analysis.
 var noiseFileSuffixes = []string{
