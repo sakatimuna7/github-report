@@ -37,11 +37,12 @@ type CommitStats struct {
 	Overtime  int
 }
 
-func (c *Client) GetReportData(ctx context.Context, owner, repo, branch string, limit int, since, until time.Time, workStart, workEnd int) (string, CommitStats, []*github.RepositoryCommit, error) {
+func (c *Client) GetReportData(ctx context.Context, owner, repo, branch string, limit int, since, until time.Time, workStart, workEnd int, authorFilter string) (string, CommitStats, []*github.RepositoryCommit, error) {
 	var allCommits []*github.RepositoryCommit
 	
 	opts := &github.CommitsListOptions{
-		SHA: branch,
+		SHA:    branch,
+		Author: authorFilter, // filter by GH login/email at API level
 		ListOptions: github.ListOptions{
 			PerPage: 100, // Max per page for efficiency
 		},
@@ -65,7 +66,21 @@ func (c *Client) GetReportData(ctx context.Context, owner, repo, branch string, 
 			return "", CommitStats{}, nil, fmt.Errorf("error fetching commits: %w", err)
 		}
 		
-		allCommits = append(allCommits, commits...)
+		// Client-side filter: keep only commits whose GH login OR author name matches
+		if authorFilter != "" {
+			for _, cm := range commits {
+				login := ""
+				if cm.Author != nil {
+					login = cm.Author.GetLogin()
+				}
+				name := cm.GetCommit().GetAuthor().GetName()
+				if strings.EqualFold(login, authorFilter) || strings.EqualFold(name, authorFilter) {
+					allCommits = append(allCommits, cm)
+				}
+			}
+		} else {
+			allCommits = append(allCommits, commits...)
+		}
 		
 		// Break if we reached the limit (if limit > 0)
 		if limit > 0 && len(allCommits) >= limit {

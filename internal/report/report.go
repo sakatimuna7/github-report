@@ -274,6 +274,14 @@ skipMenuLoop:
 		*tok = utils.Sh("gh", "auth", "token")
 	}
 
+	// Resolve authenticated GH username for author filtering
+	ghLogin := ""
+	if *tok != "" {
+		if login, err := github.NewClient(*tok).GetUserLogin(context.Background()); err == nil {
+			ghLogin = login
+		}
+	}
+
 	var dr, fr, ctxN string
 
 	for {
@@ -365,7 +373,7 @@ skipMenuLoop:
 		for _, br := range batchRepos {
 			targetBranch := br.Branch
 			if targetBranch == "" { targetBranch = *branch }
-			raw, stats, commits, err := github.NewClient(*tok).GetReportData(c, br.Owner, br.Repo, targetBranch, *lim, s, u, ws, we)
+			raw, stats, commits, err := github.NewClient(*tok).GetReportData(c, br.Owner, br.Repo, targetBranch, *lim, s, u, ws, we, ghLogin)
 			if err == nil {
 				allRaw = append(allRaw, fmt.Sprintf("=== REPOSITORY: %s/%s ===\n%s", br.Owner, br.Repo, raw))
 				allCommitsList = append(allCommitsList, commits)
